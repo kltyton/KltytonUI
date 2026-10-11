@@ -1342,7 +1342,7 @@ public record Size(double width, double height) {
         measuring.strokeWidth = base.strokeWidth;
         measuring.strokeColor = base.strokeColor;
         measuring.color = base.color;
-        measuring.fontFamily = base.fontFamily;
+        measuring.fontFamily = base.usesDefaultFont() ? "unset" : base.fontFamily;
         measuring.lineHeight = base.lineHeight;
         measuring.direction = base.direction;
         measuring.textAlign = base.textAlign;

@@ -853,7 +853,7 @@ public final class TextSelection {
         copy.strokeColor = base.strokeColor;
         copy.color = base.color;
         copy.textDecoration = base.textDecoration;
-        copy.fontFamily = base.fontFamily;
+        copy.fontFamily = base.usesDefaultFont() ? "unset" : base.fontFamily;
         copy.lineHeight = base.lineHeight;
         copy.direction = base.direction;
         copy.textAlign = base.textAlign;
@@ -885,7 +885,7 @@ public final class TextSelection {
         copy.strokeColor = base.strokeColor;
         copy.color = base.color;
         copy.textDecoration = base.textDecoration;
-        copy.fontFamily = base.fontFamily;
+        copy.fontFamily = base.usesDefaultFont() ? "unset" : base.fontFamily;
         copy.lineHeight = base.lineHeight;
         copy.direction = base.direction;
         copy.textAlign = base.textAlign;

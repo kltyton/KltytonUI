@@ -61,7 +61,7 @@ public class Text {
      */
     private record LineWidthEntry(long fontRevision, double fontSize, int fontWeight, boolean oblique,
                                   double strokeWidth, double letterSpacing, String fontFamily,
-                                  String line, double width) {
+                                  boolean defaultFont, String line, double width) {
     }
 
     // 单码点行（wrapHardLine 逐字测量）按码点复用同一个 String 实例：
@@ -120,6 +120,10 @@ public class Text {
     public Size size = null;
     public String rasterBackgroundColor = "unset";
     private Element owner;
+    private FontBackendDecision fontBackendDecision;
+
+    private record FontBackendDecision(long revision, String family, String content, int style, boolean useDefault) {
+    }
     // 标记该 Text 是否由 flex 容器直接文本节点生成。直接文本节点已由 Flex 布局居中，
     // 绘制时不应再在行框内部做二次居中，否则会把文本相对于图标基准线下移。
     public boolean flexDirect = false;
@@ -195,6 +199,7 @@ public class Text {
         }
         if (metrics.fontSize == -1) metrics.fontSize = DEFAULT_FONT_SIZE;
         if (metrics.fontWeight == -1) metrics.fontWeight = 400;
+        metrics.content = "0";
         return measureLine(metrics, "0");
     }
 
@@ -440,10 +445,18 @@ public class Text {
     }
 
     public boolean usesDefaultFont() {
+        if (fontFamily == null || "unset".equals(fontFamily)) return true;
         int fontStyle = java.awt.Font.PLAIN;
         if (isBold()) fontStyle |= java.awt.Font.BOLD;
         if (isOblique()) fontStyle |= java.awt.Font.ITALIC;
-        return Font.requiresMinecraftFallback(fontFamily, fontStyle, content);
+        long revision = Font.getMetricsRevision();
+        FontBackendDecision cached = fontBackendDecision;
+        if (cached != null && cached.revision() == revision && cached.style() == fontStyle
+                && java.util.Objects.equals(cached.family(), fontFamily)
+                && java.util.Objects.equals(cached.content(), content)) return cached.useDefault();
+        boolean useDefault = Font.requiresMinecraftFallback(fontFamily, fontStyle, content);
+        fontBackendDecision = new FontBackendDecision(revision, fontFamily, content, fontStyle, useDefault);
+        return useDefault;
     }
 
     public void retainOwnerFrom(Text source) {
@@ -923,10 +936,11 @@ public class Text {
         // 命中时零分配：槽内条目整对象替换，键逐字段精确比对，
         // 因此不会因哈希碰撞返回别的样式/文本的宽度（宽度算错会直接导致布局错乱）。
         long revision = Font.getMetricsRevision();
-        int base = lineWidthCacheSet(text, line, revision) * LINE_WIDTH_CACHE_WAYS;
+        boolean defaultFont = text.usesDefaultFont();
+        int base = lineWidthCacheSet(text, line, revision, defaultFont) * LINE_WIDTH_CACHE_WAYS;
         for (int way = 0; way < LINE_WIDTH_CACHE_WAYS; way++) {
             LineWidthEntry entry = LINE_WIDTH_CACHE[base + way];
-            if (lineWidthEntryMatches(entry, text, line, revision)) return entry.width();
+            if (lineWidthEntryMatches(entry, text, line, revision, defaultFont)) return entry.width();
         }
         double measured = measureLineUncached(text, line);
         int way = lineWidthCacheVictim++ & (LINE_WIDTH_CACHE_WAYS - 1);
@@ -938,6 +952,7 @@ public class Text {
                 text.strokeWidth,
                 text.letterSpacing,
                 text.fontFamily,
+                defaultFont,
                 line,
                 measured
         );
@@ -1007,7 +1022,7 @@ public class Text {
     }
 
     /** 由「字体度量版本 + 所有影响字宽的样式字段 + 行文本」散列到组号。 */
-    private static int lineWidthCacheSet(Text text, String line, long revision) {
+    private static int lineWidthCacheSet(Text text, String line, long revision, boolean defaultFont) {
         int h = 1;
         h = 31 * h + line.hashCode();
         h = 31 * h + (int) (revision ^ (revision >>> 32));
@@ -1017,16 +1032,18 @@ public class Text {
         h = 31 * h + (int) Math.round(text.strokeWidth * 1000);
         h = 31 * h + (int) Math.round(text.letterSpacing * 1000);
         h = 31 * h + (text.fontFamily == null ? 0 : text.fontFamily.hashCode());
+        h = 31 * h + Boolean.hashCode(defaultFont);
         h ^= h >>> 16;
         h *= 0x7feb352d;
         h ^= h >>> 15;
         return h & (LINE_WIDTH_CACHE_SETS - 1);
     }
 
-    private static boolean lineWidthEntryMatches(LineWidthEntry entry, Text text, String line, long revision) {
+    private static boolean lineWidthEntryMatches(LineWidthEntry entry, Text text, String line, long revision, boolean defaultFont) {
         if (entry == null) return false;
         // 双精度按 Double.compare 比较，与旧 record 键的相等语义完全一致。
         return entry.fontRevision() == revision
+                && entry.defaultFont() == defaultFont
                 && entry.fontWeight() == text.fontWeight
                 && entry.oblique() == text.oblique
                 && Double.compare(entry.fontSize(), text.fontSize) == 0

@@ -23,7 +23,7 @@ public final class TextMetrics {
         out.strokeColor = base.strokeColor;
         out.color = base.color;
         out.textDecoration = base.textDecoration;
-        out.fontFamily = base.fontFamily;
+        out.fontFamily = base.usesDefaultFont() ? "unset" : base.fontFamily;
         out.lineHeight = base.lineHeight;
         out.direction = base.direction;
         out.textAlign = base.textAlign;
