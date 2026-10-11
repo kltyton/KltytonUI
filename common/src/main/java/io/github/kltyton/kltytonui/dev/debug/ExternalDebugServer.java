@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ExternalDebugServer {
     public static final int PROTOCOL_VERSION = 1;
-    public static final int PORT = 25322;
+    public static final int PORT = Integer.getInteger("kltytonui.debug.port", 25322);
     public static final String ENDPOINT = "ws://127.0.0.1:" + PORT + "/kltytonui";
     private static final int MAX_QUEUED_COMMANDS = 4096;
     private static final int MAX_COMMANDS_PER_TICK = 256;
