@@ -36,8 +36,12 @@ public final class StyleScope {
 
     public void requestPseudoRecalc(Element element, String pseudoName) {
         if (element == null || element.document != owner) return;
-        RecalcMode mode = getSelectorIndex().pseudoCanAffectDescendants(pseudoName) ? RecalcMode.SUBTREE : RecalcMode.SELF;
-        requestRecalc(element, mode);
+        switch (getSelectorIndex().pseudoRecalcScope(element, pseudoName)) {
+            case SELF -> requestRecalc(element, RecalcMode.SELF);
+            case SUBTREE -> requestRecalc(element, RecalcMode.SUBTREE);
+            case PARENT_SUBTREE -> requestRecalc(element.parentElement == null ? element : element.parentElement, RecalcMode.SUBTREE);
+            case DOCUMENT -> requestRecalc(owner.documentElement, RecalcMode.SUBTREE);
+        }
     }
 
     private void requestRecalc(Element element, RecalcMode mode) {

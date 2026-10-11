@@ -17,6 +17,8 @@ import io.github.kltyton.kltytonui.parser.Color;
 import io.github.kltyton.kltytonui.parser.Selector;
 import io.github.kltyton.kltytonui.layout.Position;
 import io.github.kltyton.kltytonui.style.Text;
+import io.github.kltyton.kltytonui.style.Style;
+import io.github.kltyton.kltytonui.style.Interaction;
 import io.github.kltyton.kltytonui.ui.ColorPicker;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -708,6 +710,22 @@ public class Input extends AbstractText {
     public void tick() {
         super.tick();
         flushRangeInputEvent();
+    }
+
+    @Override
+    protected boolean valueChangeRequiresLayout(String previous, String current) {
+        if (getMode() != Mode.RANGE) return true;
+        Style style = getComputedStyle();
+        boolean scrollable = style.overflowX() == Interaction.Overflow.AUTO
+                || style.overflowX() == Interaction.Overflow.SCROLL
+                || style.overflowY() == Interaction.Overflow.AUTO
+                || style.overflowY() == Interaction.Overflow.SCROLL;
+        // A positioned range with both extents specified paints its value as a
+        // thumb position; the numeric token does not size or paint a text box.
+        if (("absolute".equals(style.position) || "fixed".equals(style.position))
+                && style.widthLength().hasNumber() && style.heightLength().hasNumber()
+                && !scrollable) return false;
+        return !Text.preservesTokenGeometry(this, previous, current);
     }
 
     public boolean handleRangeKey(int key) {

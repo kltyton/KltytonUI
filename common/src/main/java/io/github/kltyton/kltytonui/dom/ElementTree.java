@@ -9,6 +9,8 @@ import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.spi.KuiServices;
+import io.github.kltyton.kltytonui.parser.Selector;
+import io.github.kltyton.kltytonui.style.Style;
 
 public final class ElementTree {
     private final Document owner;
@@ -200,6 +202,7 @@ public final class ElementTree {
         // so the moved node remains the sole direct content element.
         KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
 
+        int textSourceBefore = renderTextSourceMode(parent);
         int safeIndex = Math.max(0, Math.min(childIndex, parent.childNodes.size()));
         parent.childNodes.add(safeIndex, child);
         syncElementChildView(parent);
@@ -211,7 +214,6 @@ public final class ElementTree {
             childElement.syncDomStateAfterAttach();
             childElement.invalidateSubtreeAfterAttach();
             childElement.invalidateStyle();
-            owner.markDirty(childElement, Drawer.RELAYOUT | Drawer.REPAINT | Drawer.REORDER);
         }
 
         int insertIndex = safeIndex == 0 ? nodes.indexOf(parent) + 1 : findSubtreeEndExclusive(parent.childNodes.get(safeIndex - 1));
@@ -219,10 +221,13 @@ public final class ElementTree {
         nodes.addAll(insertIndex, subtreeNodes);
         elements.addAll(resolveInsertIndexForElements(insertIndex), flattenElements(subtreeNodes));
 
+        boolean geometryNeutral = isGeometryNeutralChange(child, parent, textSourceBefore);
+        if (child instanceof Element childElement) {
+            owner.markDirty(childElement, (geometryNeutral ? Drawer.COMMIT_LAYOUT : Drawer.RELAYOUT)
+                    | Drawer.REPAINT | Drawer.REORDER | Drawer.HITTEST);
+        }
         if (parent instanceof Element parentElement) {
-            clearTextCaches(parentElement);
-            clearLayoutChain(parentElement);
-            owner.markDirty(parentElement, Drawer.RELAYOUT | Drawer.REORDER);
+            markParentTopologyChanged(parentElement, child, geometryNeutral);
         }
         owner.queueMutation(Document.MutationRecord.childList(parent, List.of(child), List.of(), previousSibling, nextSibling));
     }
@@ -278,15 +283,17 @@ public final class ElementTree {
         if (owner != null) owner.bumpSelectionCache();
         Node oldParent = node.parentNode;
         if (oldParent != null) {
+            int textSourceBefore = renderTextSourceMode(oldParent);
+            boolean neutralNode = isGeometryNeutralNode(node, oldParent)
+                    && (!(node instanceof Element element) || element.getRenderer().wasFixedAtLayoutCommit());
             int index = oldParent.childNodes.indexOf(node);
             Node previousSibling = index > 0 ? oldParent.childNodes.get(index - 1) : null;
             Node nextSibling = index >= 0 && index + 1 < oldParent.childNodes.size() ? oldParent.childNodes.get(index + 1) : null;
             oldParent.childNodes.removeIf(candidate -> node.uuid.equals(candidate.uuid));
             syncElementChildView(oldParent);
             if (oldParent instanceof Element oldParentElement) {
-                clearTextCaches(oldParentElement);
-                clearLayoutChain(oldParentElement);
-                owner.markDirty(oldParentElement, Drawer.RELAYOUT | Drawer.REORDER);
+                markParentTopologyChanged(oldParentElement, node,
+                        neutralNode && textSourceBefore == renderTextSourceMode(oldParent));
             }
             owner.queueMutation(Document.MutationRecord.childList(oldParent, List.of(), List.of(node), previousSibling, nextSibling));
         }
@@ -316,7 +323,47 @@ public final class ElementTree {
         if (element == null) return;
         element.getRenderer().text.clear();
         element.getRenderer().wrappedText.clear();
+        element.getRenderer().invalidateTextVersion();
         element.getRenderer().size.clear();
+    }
+
+    private boolean isGeometryNeutralChange(Node node, Node parent, int textSourceBefore) {
+        return textSourceBefore == renderTextSourceMode(parent) && isGeometryNeutralNode(node, parent);
+    }
+
+    private boolean isGeometryNeutralNode(Node node, Node parent) {
+        if (node instanceof CommentNode) return true;
+        if (node instanceof TextNode text) return text.getTextContent().isEmpty();
+        if (!(node instanceof Element element) || parent != owner.body) return false;
+        // Teleported fixed roots do not change BODY's flow allocation. Match in
+        // the current tree because moving a node can change its positioning rule.
+        Style matched = new Style();
+        matched.mergeCascade(Selector.matchCSS(element), element.getAttribute("style"));
+        return "fixed".equals(matched.position);
+    }
+
+    private static int renderTextSourceMode(Node node) {
+        if (!(node instanceof Element element)) return 0;
+        if (element.childNodes.isEmpty() && element.innerText != null && !element.innerText.isEmpty()) return 1;
+        return element.childNodes.size() == 1 && element.childNodes.get(0) instanceof TextNode ? 2 : 0;
+    }
+
+    private void markParentTopologyChanged(Element parent, Node node, boolean geometryNeutral) {
+        if (!geometryNeutral) {
+            clearTextCaches(parent);
+            clearLayoutChain(parent);
+            owner.markDirty(parent, Drawer.RELAYOUT | Drawer.REORDER);
+        } else if (node instanceof Element) {
+            // Structural selectors may still change real layout. Their style
+            // differences use the normal invalidation path after this mutation.
+            var selectors = owner.getSelectorIndex();
+            if (selectors.childListCanAffectStyles(parent)) {
+                owner.requestStyleRecalc(selectors.hasRelationalSelectors() ? owner.documentElement : parent);
+            }
+            owner.markDirty(parent, Drawer.REORDER | Drawer.REPAINT | Drawer.HITTEST);
+        } else {
+            owner.markDirty(parent, Drawer.REPAINT);
+        }
     }
 
     private static void clearLayoutChain(Element element) {

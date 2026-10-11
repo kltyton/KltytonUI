@@ -7,11 +7,13 @@ import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.style.Style;
 import io.github.kltyton.kltytonui.util.TextMetrics;
 import io.github.kltyton.kltytonui.dom.TextNode;
+import io.github.kltyton.kltytonui.dom.TextTransform;
 import io.github.kltyton.kltytonui.element.Translation;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Objects;
 import io.github.kltyton.kltytonui.style.Text;
 import io.github.kltyton.kltytonui.parser.CSS;
 
@@ -560,7 +562,10 @@ public final class NormalFlow {
         TextMetrics.copyTextForRun(base, text);
         text.color = base.color;
         text.strokeColor = base.strokeColor;
-        text.content = normalizeInlineTextFragment(content, text.whiteSpace);
+        boolean wholeTextSource = textOwner.childNodes.isEmpty() && Objects.equals(content, textOwner.innerText)
+                || textOwner.childNodes.size() == 1 && textOwner.childNodes.get(0) == node;
+        String renderedContent = wholeTextSource ? TextTransform.apply(content, textOwner) : content;
+        text.content = normalizeInlineTextFragment(renderedContent, text.whiteSpace);
         if (text.content == null || text.content.isEmpty()) return null;
         // CSS：折叠模式下位于行首（cursorX<=0）的空格被移除；折叠后至多一个前导空格。
         if (cursorX <= 0 && collapsesWhiteSpace(text.whiteSpace) && text.content.startsWith(" ")) {

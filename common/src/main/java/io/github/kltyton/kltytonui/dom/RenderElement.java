@@ -3,6 +3,7 @@ package io.github.kltyton.kltytonui.dom;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Position;
 import io.github.kltyton.kltytonui.layout.Size;
+import io.github.kltyton.kltytonui.layout.Layout;
 import io.github.kltyton.kltytonui.style.*;
 import io.github.kltyton.kltytonui.render.Rect;
 import org.joml.Matrix4f;
@@ -17,6 +18,7 @@ import io.github.kltyton.kltytonui.style.Style;
 import io.github.kltyton.kltytonui.render.Drawer;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.style.Animation;
 import io.github.kltyton.kltytonui.style.Background;
 import io.github.kltyton.kltytonui.style.Filter;
@@ -123,6 +125,7 @@ public class RenderElement {
     public double explicitHeightMemoValue = Double.NaN;
     public long explicitHeightMemoDep = Long.MIN_VALUE;
     private Rect committedRect = null;
+    private boolean committedFixedPosition;
     private Matrix4f committedWorldTransform = null;
     private long styleVersion = 1L;
     private long textVersion = 1L;
@@ -166,8 +169,13 @@ public class RenderElement {
 
     public void commitRect(Rect rect, long dependency) {
         committedRect = rect;
+        committedFixedPosition = "fixed".equals(element.getComputedStyle().position);
         committedRectDependency = dependency;
         committedRectScrollFreeDependency = rectDependencyExcludingScroll(element.document);
+    }
+
+    public boolean wasFixedAtLayoutCommit() {
+        return committedFixedPosition;
     }
 
     public void commitWorldTransform(Matrix4f worldTransform, long dependency) {
@@ -595,11 +603,13 @@ public class RenderElement {
         boolean borderGeometryChanged = borderChanged && borderGeometryChanged(origin, current);
         boolean flowLayoutChanged = check.test(LAYOUT_PROPS);
         boolean geometryChanged = check.test(OUT_OF_FLOW_GEOMETRY_PROPS);
-        boolean outOfFlow = isOutOfFlow(origin.position) && isOutOfFlow(current.position);
+        boolean outOfFlow = isOutOfFlowStyle(element, origin) && isOutOfFlowStyle(element, current);
         boolean localGeometryChanged = geometryChanged && outOfFlow && !flowLayoutChanged;
         boolean layoutChanged = flowLayoutChanged || geometryChanged;
+        boolean localFlowChange = (paddingChanged || borderGeometryChanged || layoutChanged)
+                && preservesNormalFlowContribution(element, origin, current);
 
-        if (paddingChanged || borderGeometryChanged) {
+        if ((paddingChanged || borderGeometryChanged) && !localFlowChange) {
             element.forEachRoute(e -> e.getRenderer().size.clear());
             element.forEachRoute(e -> e.getRenderer().box.clear());
             if (element.parentElement != null) {
@@ -618,7 +628,8 @@ public class RenderElement {
             dirtyMask |= Drawer.REPAINT;
         }
 
-        if (localGeometryChanged) {
+        if (localGeometryChanged || localFlowChange) {
+            if (localFlowChange) element.parentElement.getRenderer().invalidateTextVersion();
             renderer.size.clear();
             renderer.box.clear();
             renderer.position.clear();
@@ -687,10 +698,68 @@ public class RenderElement {
         return dirtyMask;
     }
 
-    /**
-     * 判断 border 变化是否影响几何（宽度或线型）。解析失败时 SideBorder 落到默认值，
-     * 与另一侧默认值比较仍成立则视为纯视觉变化；只有 size/type 有差异才需要重排。
-     */
+    private static final Set<String> FLOW_CONTRIBUTION_PROPS = Set.of(
+            "width", "minWidth", "maxWidth", "margin", "marginBottom", "marginLeft", "marginRight",
+            "padding", "paddingTop", "paddingLeft", "paddingRight", "top", "bottom", "left", "right",
+            "overflow", "overflowX", "overflowY", "aspectRatio"
+    );
+
+    private static boolean preservesNormalFlowContribution(Element element, Style origin, Style current) {
+        Element parent = element.parentElement;
+        Rect previous = element.getRenderer().getCommittedRect();
+        if (parent == null || previous == null || parent.getRenderer().getCommittedRectIfValid() == null
+                || element.hasDirtyFlag(Drawer.RELAYOUT)
+                || !"flex".equals(origin.display) || !"flex".equals(current.display)
+                || !origin.isBorderBox() || !current.isBorderBox()
+                || !Layout.isInFlow(origin) || !Layout.isInFlow(current)
+                || !"block".equals(parent.getComputedStyle().display)
+                || origin.clipsOverflow() || current.clipsOverflow()) return false;
+        for (String property : LAYOUT_PROPS) {
+            if (!"marginTop".equals(property) && !Objects.equals(origin.get(property), current.get(property))) return false;
+        }
+        for (String property : TEXT_LAYOUT_PROPS) {
+            if (!Objects.equals(origin.get(property), current.get(property))) return false;
+        }
+        for (String property : FLOW_CONTRIBUTION_PROPS) {
+            if (!Objects.equals(origin.get(property), current.get(property))) return false;
+        }
+        if (borderGeometryChanged(origin, current)) return false;
+        for (Element child : parent.getRenderChildren()) {
+            Style childStyle = child.getComputedStyle();
+            if (child != element && !"none".equals(childStyle.display) && Layout.isInFlow(childStyle)) return false;
+        }
+        if (!parent.innerText.isEmpty()) return false;
+        for (Node child : parent.getRenderChildNodes()) {
+            if (child instanceof TextNode text && !text.getTextContent().isEmpty()) return false;
+        }
+        Box before = Box.fromStyle(element, origin);
+        Box after = Box.fromStyle(element, current);
+        double beforeHeight = definiteBorderBoxHeight(origin, before);
+        double afterHeight = definiteBorderBoxHeight(current, after);
+        return equalExtent(beforeHeight, previous.getElementSize().height())
+                && equalExtent(beforeHeight + before.getMarginVertical(), afterHeight + after.getMarginVertical())
+                && equalExtent(beforeHeight - before.getBorderVertical() - before.getPaddingVertical(),
+                        afterHeight - after.getBorderVertical() - after.getPaddingVertical())
+                && equalExtent(before.getMarginHorizontal(), after.getMarginHorizontal())
+                && equalExtent(before.getMarginBottom(), after.getMarginBottom())
+                && equalExtent(before.getBorderHorizontal() + before.getPaddingHorizontal(),
+                        after.getBorderHorizontal() + after.getPaddingHorizontal());
+    }
+
+    private static double definiteBorderBoxHeight(Style style, Box box) {
+        if (style.height.contains("%") || style.minHeight.contains("%") || style.maxHeight.contains("%")) return Double.NaN;
+        Double height = Size.tryResolveLength(style.height, 0);
+        if (height == null) return Double.NaN;
+        double edges = box.getBorderVertical() + box.getPaddingVertical();
+        return Size.clampContentExtent(Math.max(0, height - edges), edges,
+                style, false, 0, false, box.element) + edges;
+    }
+
+    private static boolean equalExtent(double first, double second) {
+        return Double.isFinite(first) && Double.isFinite(second) && Math.abs(first - second) < 0.000001;
+    }
+
+    /** Compares border width and style independently of its paint color. */
     private static boolean borderGeometryChanged(Style origin, Style current) {
         for (String prop : BORDER_PROPS) {
             String oVal = origin.get(prop);
@@ -706,6 +775,13 @@ public class RenderElement {
 
     private static boolean isOutOfFlow(String position) {
         return "absolute".equalsIgnoreCase(position) || "fixed".equalsIgnoreCase(position);
+    }
+
+    private static boolean isOutOfFlowStyle(Element element, Style style) {
+        if (!style.position.isBlank()) return isOutOfFlow(style.position);
+        // Inline declaration snapshots omit positioning supplied by matched CSS.
+        var declaration = element.cssCache.get("position");
+        return declaration != null && isOutOfFlow(declaration.value());
     }
 
     private static boolean isPreserve3d(String value) {

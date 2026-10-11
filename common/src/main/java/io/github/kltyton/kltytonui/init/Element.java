@@ -1799,6 +1799,8 @@ public class Element extends Node {
         String oldValue = getTextContent();
         String normalized = value == null ? "" : value;
         boolean removedChildren = !childNodes.isEmpty();
+        boolean sameTextGeometry = document != null && isConnected() && !removedChildren && !Objects.equals(oldValue, normalized)
+                && Text.preservesLeafTokenGeometry(this, oldValue, normalized);
         if (!childNodes.isEmpty()) {
             ArrayList<Node> snapshot = new ArrayList<>(childNodes);
             for (Node child : snapshot) {
@@ -1814,8 +1816,16 @@ public class Element extends Node {
         if (!Objects.equals(oldValue, normalized) && isConnected()) FontDrawer.markDynamicTextOwner(this);
         getRenderer().text.clear();
         getRenderer().wrappedText.clear();
-        getRenderer().size.clear();
+        if (!sameTextGeometry) getRenderer().size.clear();
         if (document != null && !Objects.equals(oldValue, normalized)) {
+            if (sameTextGeometry) {
+                // Flow objects retain text runs; refresh those snapshots without
+                // invalidating unchanged intrinsic and used sizes along the route.
+                forEachRoute(element -> element.getRenderer().invalidateTextVersion());
+                document.markDirty(this, Drawer.REPAINT);
+                document.queueMutation(Document.MutationRecord.characterData(this, oldValue));
+                return;
+            }
             // Text contributes intrinsic size. Its ancestors and following siblings
             // therefore need the same layout invalidation as a normal-flow resize.
             getRenderer().invalidateLayoutSubtree();

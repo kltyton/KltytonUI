@@ -81,7 +81,9 @@ For extension tags such as texture, sprite, and translation, see the [Extension 
 
 - ✅ margin/padding (including auto centering), margin collapsing, border shorthand, border-radius (including elliptical dual radii), border-image nine-slice, box-shadow (multiple, inset), box-sizing, width/height min/max, aspect-ratio, px/%/em/rem/vw/vh, min()/max()/clamp();
 - 🟡 **Negative margins are clamped to 0**; calc() **only supports addition and subtraction** — no multiplication/division or nesting;
-- ❌ border-style (everything draws as solid), border-width keywords (thin/medium/thick), fit-content/min-content/max-content, vmin/vmax/ch/ex, physical units.
+- ❌ border-style (everything draws as solid), border-width keywords (thin/medium/thick), fit-content/min-content/max-content, vmin/vmax/ex, physical units.
+
+`ch` resolves from the owning element's zero-glyph advance for element dimensions, min/max constraints, box spacing, and Flex sizing, including `calc()` and math expressions. Grid tracks, transforms, and other length consumers without an element font context remain outside this coverage.
 
 **Positioning**: static/relative/fixed/absolute ✅ (absolute containing block rules are normal; known deviations: both-sides-auto anchors to the containing block origin instead of the static position, and transform/filter ancestors don't establish a containing block); z-index ✅; **sticky ❌, float/clear ❌**.
 

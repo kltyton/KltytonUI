@@ -85,7 +85,9 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 
 - ✅ margin/padding（含 auto 居中）、margin 折叠、border 简写、border-radius（含椭圆双半径）、border-image 九宫格、box-shadow（多重、inset）、box-sizing、宽高 min/max、aspect-ratio、px/%/em/rem/vw/vh、min()/max()/clamp()；
 - 🟡 **负 margin 被钳成 0**；calc() **只支持加减**，不能乘除嵌套；
-- ❌ border-style（全部画成实线）、border-width 关键字（thin/medium/thick）、fit-content/min-content/max-content、vmin/vmax/ch/ex、物理单位。
+- ❌ border-style（全部画成实线）、border-width 关键字（thin/medium/thick）、fit-content/min-content/max-content、vmin/vmax/ex、物理单位。
+
+`ch` 可用于元素宽高、min/max、内外边距与 Flex 尺寸，按元素实际字体中“0”的字形宽度求值，支持 `calc()` 和数学表达式。Grid 轨道、transform 等尚未传入元素字体上下文的长度调用不在此范围。
 
 **定位**：static/relative/fixed/absolute ✅（absolute 包含块规则正常；已知偏差：双侧 auto 锚定包含块原点而非静态位置，transform/filter 祖先不形成包含块）；z-index ✅；**sticky ❌、float/clear ❌**。
 

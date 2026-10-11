@@ -1,5 +1,7 @@
 package io.github.kltyton.kltytonui.layout;
 
+import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.style.Text;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -25,6 +27,7 @@ public final class CssLength {
     private static final int UNIT_EM = 3;
     private static final int UNIT_VW = 4;
     private static final int UNIT_VH = 5;
+    private static final int UNIT_CH = 6;
 
     private static final int KIND_INVALID = 0;
     private static final int KIND_SINGLE = 1;
@@ -34,8 +37,8 @@ public final class CssLength {
     private static final java.util.regex.Pattern NUMBER_LITERAL = java.util.regex.Pattern.compile(
             "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?");
     private static final java.util.regex.Pattern SIMPLE_CALC = java.util.regex.Pattern.compile(
-            "\\s*[+-]?\\s*(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:px|%|rem|em|vw|vh)"
-                    + "(?:\\s*[+-]\\s*(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:px|%|rem|em|vw|vh))*\\s*",
+            "\\s*[+-]?\\s*(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:px|%|rem|em|vw|vh|ch)"
+                    + "(?:\\s*[+-]\\s*(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:px|%|rem|em|vw|vh|ch))*\\s*",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private record LengthToken(double value, int unit) {
@@ -229,37 +232,48 @@ public final class CssLength {
 
     /** 用根字号作为 em 基准求值；不可解析返回 null。 */
     public Double resolve(double percentBasis) {
-        return resolve(percentBasis, 0.0d, true);
+        return resolve(percentBasis, 0.0d, true, null);
     }
 
     /** 用显式 em 基准求值；不可解析返回 null。 */
     public Double resolve(double percentBasis, double emBasis) {
-        return resolve(percentBasis, emBasis, false);
+        return resolve(percentBasis, emBasis, false, null);
     }
 
-    private Double resolve(double percentBasis, double emBasis, boolean rootEmBasis) {
+    /** Resolves character-relative lengths with the font of their owning element. */
+    public Double resolve(double percentBasis, Element element) {
+        return resolve(percentBasis, 0.0d, true, element);
+    }
+
+    public Double resolve(double percentBasis, double emBasis, Element element) {
+        return resolve(percentBasis, emBasis, false, element);
+    }
+
+    private Double resolve(double percentBasis, double emBasis, boolean rootEmBasis,
+                           Element element) {
         return switch (kind) {
-            case KIND_SINGLE -> evalLengthToken(token, percentBasis, emBasis, rootEmBasis);
+            case KIND_SINGLE -> evalLengthToken(token, percentBasis, emBasis, rootEmBasis, element);
             case KIND_CALC -> {
                 double result = 0;
                 for (int index = 0; index < terms.size(); index++) {
-                    result += evalLengthToken(terms.get(index), percentBasis, emBasis, rootEmBasis);
+                    result += evalLengthToken(terms.get(index), percentBasis, emBasis, rootEmBasis, element);
                 }
                 yield result;
             }
-            case KIND_MATH -> resolveMath(percentBasis, emBasis, rootEmBasis);
+            case KIND_MATH -> resolveMath(percentBasis, emBasis, rootEmBasis, element);
             case KIND_EXPRESSION -> CalcLengthExpression.evaluate(expression, value -> {
                 LengthToken length = parseLengthToken(value);
-                return length == INVALID_TOKEN ? null : evalLengthToken(length, percentBasis, emBasis, rootEmBasis);
+                return length == INVALID_TOKEN ? null : evalLengthToken(length, percentBasis, emBasis, rootEmBasis, element);
             });
             default -> null;
         };
     }
 
-    private Double resolveMath(double percentBasis, double emBasis, boolean rootEmBasis) {
+    private Double resolveMath(double percentBasis, double emBasis, boolean rootEmBasis,
+                               Element element) {
         double[] resolved = new double[mathArgs.length];
         for (int index = 0; index < mathArgs.length; index++) {
-            Double length = mathArgs[index].resolve(percentBasis, emBasis, rootEmBasis);
+            Double length = mathArgs[index].resolve(percentBasis, emBasis, rootEmBasis, element);
             if (length == null) return null;
             resolved[index] = length;
         }
@@ -283,6 +297,11 @@ public final class CssLength {
     /** 不可解析时返回 fallback；等价于 {@link Size#resolveLength}。 */
     public double resolveOr(double fallback, double percentBasis) {
         Double resolved = resolve(percentBasis);
+        return resolved == null ? fallback : resolved;
+    }
+
+    public double resolveOr(double fallback, double percentBasis, Element element) {
+        Double resolved = resolve(percentBasis, element);
         return resolved == null ? fallback : resolved;
     }
 
@@ -428,6 +447,7 @@ public final class CssLength {
         else if (value.endsWith("em")) { unit = UNIT_EM; suffixLength = 2; }
         else if (value.endsWith("vw")) { unit = UNIT_VW; suffixLength = 2; }
         else if (value.endsWith("vh")) { unit = UNIT_VH; suffixLength = 2; }
+        else if (value.endsWith("ch")) { unit = UNIT_CH; suffixLength = 2; }
         else if (value.endsWith("px")) suffixLength = 2;
         String numeric = value.substring(0, value.length() - suffixLength);
         if (!NUMBER_LITERAL.matcher(numeric).matches()) return INVALID_TOKEN;
@@ -436,13 +456,15 @@ public final class CssLength {
         return new LengthToken(number, unit);
     }
 
-    private static double evalLengthToken(LengthToken token, double percentBasis, double emBasis, boolean rootEmBasis) {
+    private static double evalLengthToken(LengthToken token, double percentBasis, double emBasis, boolean rootEmBasis,
+                                          Element element) {
         return switch (token.unit()) {
             case UNIT_PERCENT -> percentBasis * (token.value() / 100d);
             case UNIT_REM -> token.value() * Size.getRootFontSize();
             case UNIT_EM -> token.value() * (rootEmBasis ? Size.getRootFontSize() : emBasis);
             case UNIT_VW -> Size.getWindowWidth() * (token.value() / 100d);
             case UNIT_VH -> Size.getWindowHeight() * (token.value() / 100d);
+            case UNIT_CH -> token.value() * Text.zeroCharacterWidth(element);
             default -> token.value();
         };
     }

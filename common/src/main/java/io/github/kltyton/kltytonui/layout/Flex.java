@@ -575,7 +575,7 @@ public class Flex {
                 ? ("unset".equals(style.rowGap) ? style.gap : style.rowGap)
                 : ("unset".equals(style.columnGap) ? style.gap : style.columnGap);
         double basis = column ? Size.getScaleHeight(parent) : Size.getScaleWidth(parent);
-        return Math.max(0, Size.resolveLength(raw, basis, 0));
+        return Math.max(0, Size.resolveLength(raw, basis, 0, parent));
     }
 
     private static double resolveAvailableMainSize(Element parent, Box parentBox, Flex flex) {
@@ -681,6 +681,20 @@ public class Flex {
                     Size constrained = Size.naturalAtContentWidth(element, contentWidth);
                     contentHeight = Math.max(0, constrained.height() - verticalBox);
                 }
+            }
+        }
+
+        if (parentResolving && Size.isNaturalMeasurementContext() && !flexWraps(flex)
+                && shouldStretchCrossAxis(element, parent)) {
+            if (flex.flexDirection.contains("column")) {
+                Double parentCrossWidth = Size.resolveNaturalCrossWidth(parent);
+                if (parentCrossWidth != null) {
+                    contentWidth = Math.max(0, parentCrossWidth - box.getMarginHorizontal() - horizontalBox);
+                }
+            } else if (!flexWraps(flex) && explicitParentHeight != null) {
+                contentHeight = Math.max(0, explicitParentHeight - parent.getHorizontalScrollbarGutter()
+                        - box.getMarginVertical() - verticalBox);
+                crossSizeStretched = true;
             }
         }
 
@@ -922,7 +936,7 @@ public class Flex {
                     && !Size.isNaturalMeasurementContext()
                     && Size.hasDefiniteMainSizeForFlexItems(parent)) {
                 double basis = Size.getScaleWidth(item);
-                Double resolvedWidth = basis > 0 ? Size.tryResolveLength(style.width, basis) : null;
+                Double resolvedWidth = basis > 0 ? Size.tryResolveLength(style.width, basis, item) : null;
                 if (resolvedWidth != null) {
                     Box box = Box.of(item);
                     double outer = box.isBorderBox() ? resolvedWidth
@@ -940,7 +954,7 @@ public class Flex {
         // 偏大：rewind_screen 的 .tree-card 里 flex:1 0 100% 的 .tree-meta 因此按
         // 1068px（.tree-chart 宽）而不是 310px（卡片内容宽）排版。
         double percentBasis = columnMainAxis ? Size.getScaleHeight(item) : Size.getScaleWidth(item);
-        Double resolved = style.flexBasisLength().resolve(percentBasis);
+        Double resolved = style.flexBasisLength().resolve(percentBasis, item);
         // flex-basis: content（及任何不可解析关键字）按规范取内容尺寸——
         // 与 auto 一样落回自然尺寸，不能塌缩成 0（仅盒装饰尺寸）。
         if (resolved == null) return Math.max(0, naturalOuterMainSize);
@@ -975,7 +989,7 @@ public class Flex {
             if (!parentHeightDefinite) return Double.POSITIVE_INFINITY;
         }
         double basis = columnMainAxis ? Size.getScaleHeight(item) : Size.getScaleWidth(item);
-        double resolved = maxLength.resolveOr(parsedMax, basis);
+        double resolved = maxLength.resolveOr(parsedMax, basis, item);
         Box box = Box.of(item);
         double total = resolved + (columnMainAxis ? box.getMarginVertical() : box.getMarginHorizontal());
         return Math.max(0, total);
@@ -1011,7 +1025,7 @@ public class Flex {
         }
 
         double basis = columnMainAxis ? Size.getScaleHeight(item) : Size.getScaleWidth(item);
-        double resolved = minLength.resolveOr(parsedMin, basis);
+        double resolved = minLength.resolveOr(parsedMin, basis, item);
         Box box = Box.of(item);
         boolean borderBox = style.isBorderBox();
 
@@ -1291,7 +1305,7 @@ public class Flex {
                 return 0;
             }
         }
-        double resolvedHeight = heightLength.resolveOr(declaredHeight, Size.getScaleHeight(parent));
+        double resolvedHeight = heightLength.resolveOr(declaredHeight, Size.getScaleHeight(parent), parent);
         if (box.isBorderBox()) {
             resolvedHeight -= box.getBorderVertical() + box.getPaddingVertical();
         }
@@ -1422,7 +1436,7 @@ public class Flex {
         CssLength widthLength = style.widthLength();
         Double declaredWidth = widthLength.numberValue();
         if (declaredWidth != null) {
-            double resolvedWidth = widthLength.resolveOr(declaredWidth, Size.getScaleWidth(parent));
+            double resolvedWidth = widthLength.resolveOr(declaredWidth, Size.getScaleWidth(parent), parent);
             if (box.isBorderBox()) {
                 resolvedWidth -= box.getBorderHorizontal() + box.getPaddingHorizontal();
             }
@@ -1476,7 +1490,7 @@ public class Flex {
                 ? ("unset".equals(style.rowGap) ? style.gap : style.rowGap)
                 : ("unset".equals(style.columnGap) ? style.gap : style.columnGap);
         double basis = rowAxis ? Size.getScaleHeight(parent) : Size.getScaleWidth(parent);
-        return Math.max(0, Size.resolveLength(raw, basis, 0));
+        return Math.max(0, Size.resolveLength(raw, basis, 0, parent));
     }
 
     private static double resolveCrossOffset(Flex flex, double availableCross, double usedCross) {

@@ -756,17 +756,22 @@ public abstract class AbstractText extends Element {
     @Override
     public void tick() {
         if (!Objects.equals(cachedValue, value) && value != null) {
+            boolean requiresLayout = valueChangeRequiresLayout(cachedValue, value);
             cachedValue = value;
             getRenderer().text.clear();
-            getRenderer().size.clear();
+            if (requiresLayout) getRenderer().size.clear();
             if (document != null) {
-                document.markDirty(this, Drawer.RELAYOUT | Drawer.REPAINT);
-                if (parentElement != null) {
+                document.markDirty(this, Drawer.REPAINT | (requiresLayout ? Drawer.RELAYOUT : 0));
+                if (requiresLayout && parentElement != null) {
                     parentElement.getRenderer().size.clear();
                     document.markDirty(parentElement, Drawer.RELAYOUT | Drawer.REPAINT);
                 }
             }
         }
+    }
+
+    protected boolean valueChangeRequiresLayout(String previous, String current) {
+        return true;
     }
 
     @Override

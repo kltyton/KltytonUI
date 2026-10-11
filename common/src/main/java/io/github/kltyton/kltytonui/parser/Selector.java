@@ -376,8 +376,9 @@ public class Selector {
         private final Map<String, List<IndexedRule>> byPseudo = new HashMap<>();
         private final Map<String, List<IndexedRule>> byAttr = new HashMap<>();
         private final Map<String, List<IndexedRule>> byScrollbarPseudo = new HashMap<>();
-        private final Set<String> pseudosAffectingDescendants = new HashSet<>();
+        private final Map<String, List<PseudoDependency>> pseudoDependencies = new HashMap<>();
         private boolean hasRelationalSelectors;
+        private final Set<Component> topologyDependentComponents = new HashSet<>();
         private final List<IndexedRule> always = new ArrayList<>();
 
         // 每次调用 match() 时复用的临时缓冲区（仅 tick 线程）
@@ -414,13 +415,8 @@ public class Selector {
 
         private void addRule(IndexedRule rule) {
             List<Component> components = rule.selector.components;
-            for (Component component : components) {
-                if (component == null || component.pseudos == null) continue;
-                for (Pseudo pseudo : component.pseudos) {
-                    if (pseudo != null && "has".equals(pseudo.name)) hasRelationalSelectors = true;
-                }
-            }
-            recordAncestorPseudoDependencies(rule.selector);
+            recordTopologyDependencies(rule.selector);
+            recordPseudoDependencies(rule.selector, List.of(), PseudoRecalcScope.SELF);
             Component last = components.get(components.size() - 1);
 
             // 滚动条伪元素必须最先分桶：::-webkit-scrollbar-thumb 这类选择器往往
@@ -464,24 +460,109 @@ public class Selector {
             always.add(rule);
         }
 
-        private void recordAncestorPseudoDependencies(CompiledSelector selector) {
-            if (selector == null || selector.components == null || selector.components.size() <= 1) return;
-            for (int i = 0; i < selector.components.size() - 1; i++) {
+        public enum PseudoRecalcScope { SELF, SUBTREE, PARENT_SUBTREE, DOCUMENT }
+
+        private record PseudoDependency(List<Component> hostComponents, PseudoRecalcScope scope) {
+            boolean matchesHost(Element element) {
+                for (Component component : hostComponents) {
+                    if (!matchesIdentifiers(component, element)) return false;
+                }
+                return true;
+            }
+        }
+
+        private void recordPseudoDependencies(CompiledSelector selector, List<Component> subjectComponents,
+                                             PseudoRecalcScope subjectScope) {
+            int last = selector.components.size() - 1;
+            for (int i = 0; i <= last; i++) {
                 Component component = selector.components.get(i);
-                if (component == null || component.pseudos == null || component.pseudos.isEmpty()) continue;
+                if (component.pseudos == null || component.pseudos.isEmpty()) continue;
+                PseudoRecalcScope scope = subjectScope;
+                if (i < last) {
+                    Combinator continuation = selector.combinators.get(i);
+                    scope = continuation == Combinator.ADJACENT_SIBLING || continuation == Combinator.GENERAL_SIBLING
+                            ? PseudoRecalcScope.PARENT_SUBTREE : PseudoRecalcScope.SUBTREE;
+                }
+                ArrayList<Component> hosts = new ArrayList<>();
+                if (i == last) hosts.addAll(subjectComponents);
+                hosts.add(component);
+                List<Component> hostComponents = List.copyOf(hosts);
                 for (Pseudo pseudo : component.pseudos) {
-                    if (pseudo == null || pseudo.name == null || pseudo.name.isBlank()) continue;
-                    pseudosAffectingDescendants.add(pseudo.name);
+                    if ("has".equals(pseudo.name)) {
+                        hasRelationalSelectors = true;
+                    } else if (!pseudo.selectors.isEmpty()) {
+                        for (CompiledSelector nested : pseudo.selectors) {
+                            recordPseudoDependencies(nested, hostComponents, scope);
+                        }
+                    } else {
+                        pseudoDependencies.computeIfAbsent(pseudo.name, ignored -> new ArrayList<>())
+                                .add(new PseudoDependency(hostComponents, scope));
+                    }
                 }
             }
         }
 
-        public boolean pseudoCanAffectDescendants(String pseudoName) {
-            return pseudoName != null && pseudosAffectingDescendants.contains(pseudoName);
+        public PseudoRecalcScope pseudoRecalcScope(Element element, String pseudoName) {
+            if (hasRelationalSelectors) return PseudoRecalcScope.DOCUMENT;
+            PseudoRecalcScope scope = PseudoRecalcScope.SELF;
+            List<PseudoDependency> dependencies = pseudoDependencies.get(pseudoName);
+            if (dependencies == null) return scope;
+            // Match stable identifiers rather than the changed pseudo state, including on release.
+            for (PseudoDependency dependency : dependencies) {
+                if (dependency.scope.ordinal() > scope.ordinal() && dependency.matchesHost(element)) {
+                    scope = dependency.scope;
+                }
+            }
+            return scope;
         }
 
         public boolean hasRelationalSelectors() {
             return hasRelationalSelectors;
+        }
+
+        private boolean recordTopologyDependencies(CompiledSelector selector) {
+            return recordTopologyDependencies(selector, true);
+        }
+
+        private boolean recordTopologyDependencies(CompiledSelector selector, boolean collectComponents) {
+            boolean dependent = false;
+            for (int i = 0; i < selector.components.size(); i++) {
+                Component component = selector.components.get(i);
+                boolean componentDependent = i > 0
+                        && (selector.combinators.get(i - 1) == Combinator.ADJACENT_SIBLING
+                        || selector.combinators.get(i - 1) == Combinator.GENERAL_SIBLING);
+                if (component.pseudos != null) {
+                    for (Pseudo pseudo : component.pseudos) {
+                        if ("has".equals(pseudo.name)) hasRelationalSelectors = true;
+                        componentDependent |= switch (pseudo.name) {
+                            case "empty", "first-child", "last-child", "only-child", "nth-child", "nth-last-child",
+                                    "first-of-type", "last-of-type", "only-of-type", "nth-of-type", "nth-last-of-type" -> true;
+                            default -> false;
+                        };
+                        for (CompiledSelector nested : pseudo.selectors) componentDependent |= recordTopologyDependencies(nested, false);
+                    }
+                }
+                if (componentDependent) {
+                    if (collectComponents || i < selector.components.size() - 1) topologyDependentComponents.add(component);
+                    dependent = true;
+                }
+            }
+            return dependent;
+        }
+
+        public boolean childListCanAffectStyles(Element parent) {
+            if (hasRelationalSelectors) return true;
+            for (Component component : topologyDependentComponents) {
+                if (matchesIdentifiers(component, parent)) return true;
+                for (Element child : parent.children) if (matchesIdentifiers(component, child)) return true;
+            }
+            return false;
+        }
+
+        private static boolean matchesIdentifiers(Component component, Element element) {
+            return (component.tag == null || "*".equals(component.tag) || component.tag.equalsIgnoreCase(element.tagName))
+                    && (component.id == null || component.id.equals(element.getAttribute("id")))
+                    && (component.classes == null || element.getClassNames().containsAll(component.classes));
         }
 
         public HashMap<String, CSS.Declaration> match(Element element) {

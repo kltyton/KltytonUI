@@ -119,9 +119,14 @@ public class Box {
         Box cache = element.getRenderer().box.get();
         if (cache != null) return cache;
 
+        Box resultBox = fromStyle(element, element.getComputedStyle());
+        element.getRenderer().box.set(resultBox);
+        return resultBox;
+    }
+
+    public static Box fromStyle(Element element, Style style) {
         Box resultBox = new Box();
         resultBox.element = element;
-        Style style = element.getComputedStyle();
 
         if (valid(style.border)) resultBox.applyBorderAll(style.border);
         if (valid(style.borderTop)) resultBox.applyBorder("top", style.borderTop);
@@ -159,7 +164,6 @@ public class Box {
             };
         }
 
-        element.getRenderer().box.set(resultBox);
         return resultBox;
     }
 
@@ -258,7 +262,7 @@ public class Box {
     private double resolveBoxLength(String value) {
         if (element == null) return Math.max(0, Size.resolveLength(value, 0, 0));
         double basis = Size.isPercent(value) ? Size.getScaleWidth(element) : 0;
-        return Math.max(0, Size.resolveLength(value, basis, 0));
+        return Math.max(0, Size.resolveLength(value, basis, 0, element));
     }
 
     /**
@@ -268,7 +272,7 @@ public class Box {
     private double resolveMarginLength(String value) {
         if (element == null) return Size.resolveLength(value, 0, 0);
         double basis = Size.isPercent(value) ? Size.getScaleWidth(element) : 0;
-        return Size.resolveLength(value, basis, 0);
+        return Size.resolveLength(value, basis, 0, element);
     }
 
     /**

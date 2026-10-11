@@ -138,7 +138,7 @@ public class Text {
         if (declared == null || declared.isBlank() || "unset".equalsIgnoreCase(declared)) {
             if (Style.isFormControl(element) && !hasAuthorFontSizeDeclaration(element)) {
                 Double userAgentFontSize = Size.tryResolveLength(
-                        computedStyle.fontSize, parentFontSize, parentFontSize);
+                        computedStyle.fontSize, parentFontSize, parentFontSize, parent);
                 if (userAgentFontSize != null && userAgentFontSize > 0) return userAgentFontSize;
             }
             return parentFontSize;
@@ -150,7 +150,7 @@ public class Text {
         }
         if ("initial".equals(normalized)) return DEFAULT_FONT_SIZE;
 
-        Double parsed = Size.tryResolveLength(declared, parentFontSize, parentFontSize);
+        Double parsed = Size.tryResolveLength(declared, parentFontSize, parentFontSize, parent);
         return parsed != null && parsed > 0 ? parsed : parentFontSize;
     }
 
@@ -176,6 +176,26 @@ public class Text {
             }
         }
         return fontWeight;
+    }
+
+    /** Font advance only; resolving a length must not enter text wrapping or layout. */
+    public static double zeroCharacterWidth(Element element) {
+        Text metrics = new Text();
+        metrics.owner = element;
+        if (element != null) {
+            ResolveState state = new ResolveState();
+            for (Element current : element.getRouteArray()) {
+                Style style = current.getComputedStyle();
+                boolean unresolved = resolveFontFamily(metrics, style);
+                unresolved |= resolveFontSize(metrics, style, current, element);
+                unresolved |= resolveFontWeight(metrics, style);
+                unresolved |= resolveFontStyle(metrics, style, state);
+                if (!unresolved) break;
+            }
+        }
+        if (metrics.fontSize == -1) metrics.fontSize = DEFAULT_FONT_SIZE;
+        if (metrics.fontWeight == -1) metrics.fontWeight = 400;
+        return measureLine(metrics, "0");
     }
 
     public static boolean isOblique(Element element) {
@@ -915,6 +935,68 @@ public class Text {
                 measured
         );
         return measured;
+    }
+
+    /** Whether replacing an unbreakable leaf token preserves its intrinsic box dimensions. */
+    public static boolean preservesLeafTokenGeometry(Element element, String previous, String replacement) {
+        if (element.getClass() != Element.class || Style.isFormControl(element)
+                || !element.childNodes.isEmpty() || !element.getRenderChildren().isEmpty()
+                || !isUnbreakableAsciiToken(previous) || !isUnbreakableAsciiToken(replacement)) return false;
+        return previous.equals(Text.of(element).content)
+                && preservesTokenGeometry(element, previous, replacement);
+    }
+
+    /** Compares value tokens under one resolved font and wrapping description. */
+    public static boolean preservesTokenGeometry(Element element, String previous, String replacement) {
+        if (!isUnbreakableAsciiToken(previous) || !isUnbreakableAsciiToken(replacement)) return false;
+        if (!previous.equals(TextTransform.apply(previous, element))
+                || !replacement.equals(TextTransform.apply(replacement, element))) return false;
+        Text metrics = Text.of(element);
+        if (!("normal".equals(metrics.whiteSpace) || "nowrap".equals(metrics.whiteSpace))
+                || !("normal".equals(metrics.wordBreak) || "keep-all".equals(metrics.wordBreak))
+                || !"normal".equals(metrics.overflowWrap)) return false;
+        double previousWidth = measureLine(metrics, previous);
+        double replacementWidth = measureLine(metrics, replacement);
+        // One parsed description supplies identical font and vertical metrics.
+        // Full line width also preserves this token's min/max-content contribution.
+        if (!Double.isFinite(previousWidth) || !Double.isFinite(replacementWidth)) return false;
+        if (Double.compare(previousWidth, replacementWidth) == 0) return true;
+        return fitsMinimumWidthLeaf(element, metrics, previousWidth, replacementWidth);
+    }
+
+    private static boolean fitsMinimumWidthLeaf(Element element, Text metrics,
+                                                double previousWidth, double replacementWidth) {
+        if (element.getClass() != Element.class || Style.isFormControl(element)
+                || !element.childNodes.isEmpty() || !element.getRenderChildren().isEmpty()
+                || element.parentElement == null || metrics.textIndent != 0
+                || element.getVerticalScrollbarGutter() != 0) return false;
+        Style style = element.getComputedStyle();
+        Style parentStyle = element.parentElement.getComputedStyle();
+        if (!style.isInFlow() || !(parentStyle.isFlexDisplay() || "grid".equals(parentStyle.display)
+                || "inline-grid".equals(parentStyle.display))
+                || !(style.width.isBlank() || "auto".equals(style.width) || "unset".equals(style.width))
+                || !(style.aspectRatio.isBlank() || "auto".equals(style.aspectRatio) || "unset".equals(style.aspectRatio))
+                || style.minWidth.contains("%") || style.padding.contains("%")
+                || style.paddingLeft.contains("%") || style.paddingRight.contains("%")) return false;
+        Double minimumWidth = style.minWidthLength().resolve(0, element);
+        if (minimumWidth == null || !Double.isFinite(minimumWidth)) return false;
+        Box box = Box.of(element);
+        double minimumContentWidth = Math.max(0, minimumWidth
+                - (style.isBorderBox() ? box.getBorderHorizontal() + box.getPaddingHorizontal() : 0));
+        // Both complete tokens fit below the same intrinsic lower bound; clipping
+        // by max-width alone cannot preserve a token's layout contribution.
+        return previousWidth <= minimumContentWidth && replacementWidth <= minimumContentWidth;
+    }
+
+    private static boolean isUnbreakableAsciiToken(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (!(character >= '0' && character <= '9')
+                    && !(character >= 'a' && character <= 'z')
+                    && !(character >= 'A' && character <= 'Z') && character != '_') return false;
+        }
+        return true;
     }
 
     /** 由「字体度量版本 + 所有影响字宽的样式字段 + 行文本」散列到组号。 */
