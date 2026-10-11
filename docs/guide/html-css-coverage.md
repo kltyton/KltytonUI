@@ -123,6 +123,7 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 ## 文本
 
 - ✅ font-family（@font-face + 回退链）、font-size、line-height、text-indent、letter-spacing、white-space 六值、**word-break（normal/break-all/keep-all，含基础 CJK 检测）**、text-overflow:ellipsis、line-clamp、direction、text-transform（uppercase/lowercase/capitalize）；
+- 声明的字体全部缺失，或回退链仍无法显示文字中的码点时，该文本使用 Minecraft 默认字体；宽度、行框基线和绘制使用同一后端。已安装与已注册的可用字体保留，字体注册和资源重载会刷新回退判定。
 - 🟡 font-weight（bolder/lighter 固定映射 700/300，不按父权重算）；**font-style 只认 oblique，italic 不触发斜体**；text-align 的 **justify 等同 start**；text-decoration 只有 underline/line-through；
 - ❌ font 简写、text-shadow、overflow-wrap、word-spacing；
 - 非标准扩展：`selection-color`（选区颜色）、`text-stroke`（描边）；

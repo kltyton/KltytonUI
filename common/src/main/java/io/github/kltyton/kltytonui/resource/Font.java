@@ -27,6 +27,7 @@ public class Font {
     private static final Map<String, List<java.awt.Font>> SINGLE_FAMILY_CHAIN_CACHE = createLruCache(BASE_FONT_CHAIN_CACHE_LIMIT);
     private static final Map<DerivedFontKey, java.awt.Font> DERIVED_FONT_CACHE = new ConcurrentHashMap<>();
     private static final Map<RunPlanKey, List<FontRun>> RUN_PLAN_CACHE = createLruCache(RUN_PLAN_CACHE_LIMIT);
+    private static final Map<RunPlanKey, Boolean> MINECRAFT_FALLBACK_CACHE = createLruCache(RUN_PLAN_CACHE_LIMIT);
     private static final int NORMALIZED_CHAIN_CACHE_LIMIT = 1024;
     private static final Map<String, String> NORMALIZED_CHAIN_CACHE = createLruCache(NORMALIZED_CHAIN_CACHE_LIMIT);
     private static final Set<String> UNAVAILABLE_FAMILIES = ConcurrentHashMap.newKeySet();
@@ -136,6 +137,39 @@ public class Font {
     public static java.awt.Font resolveBaseFont(String rawFamilyChain) {
         List<java.awt.Font> chain = resolveBaseFontChain(rawFamilyChain);
         return chain.isEmpty() ? FONTS.get(DEFAULT_KEY) : chain.get(0);
+    }
+
+    /** Missing families and glyphs use the game's resource-pack-aware font backend. */
+    public static boolean requiresMinecraftFallback(String rawFamilyChain, int fontStyle, String content) {
+        if (rawFamilyChain == null || rawFamilyChain.isBlank() || "unset".equals(rawFamilyChain)) return true;
+        String value = content == null ? "" : content;
+        RunPlanKey key = new RunPlanKey(normalizeFamilyChain(rawFamilyChain), fontStyle, 0, value);
+        Boolean cached = MINECRAFT_FALLBACK_CACHE.get(key);
+        if (cached != null) return cached;
+
+        boolean declaredFontAvailable = false;
+        for (String family : parseFontFamilies(rawFamilyChain)) {
+            if (resolveSingleFamily(family) != null) {
+                declaredFontAvailable = true;
+                break;
+            }
+        }
+        boolean fallback = !declaredFontAvailable;
+        if (!fallback) {
+            for (FontRun run : planFontRuns(rawFamilyChain, fontStyle, BASE_FONT_SIZE, value)) {
+                for (int offset = 0; offset < run.text().length(); ) {
+                    int codePoint = run.text().codePointAt(offset);
+                    if (!Character.isISOControl(codePoint) && !run.font().canDisplay(codePoint)) {
+                        fallback = true;
+                        break;
+                    }
+                    offset += Character.charCount(codePoint);
+                }
+                if (fallback) break;
+            }
+        }
+        MINECRAFT_FALLBACK_CACHE.put(key, fallback);
+        return fallback;
     }
 
     public static List<java.awt.Font> resolveBaseFontChain(String rawFamilyChain) {
@@ -546,6 +580,7 @@ public class Font {
         BASE_FONT_CHAIN_CACHE.clear();
         DERIVED_FONT_CACHE.clear();
         RUN_PLAN_CACHE.clear();
+        MINECRAFT_FALLBACK_CACHE.clear();
     }
 
     private static String normalizeFamilyChain(String rawFamilyChain) {

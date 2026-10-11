@@ -439,6 +439,13 @@ public class Text {
         return owner;
     }
 
+    public boolean usesDefaultFont() {
+        int fontStyle = java.awt.Font.PLAIN;
+        if (isBold()) fontStyle |= java.awt.Font.BOLD;
+        if (isOblique()) fontStyle |= java.awt.Font.ITALIC;
+        return Font.requiresMinecraftFallback(fontFamily, fontStyle, content);
+    }
+
     public void retainOwnerFrom(Text source) {
         owner = source == null ? null : source.owner;
     }
@@ -799,7 +806,7 @@ public class Text {
 
     private static double normalLineHeight(Text text) {
         if (text == null) return normalLineHeight(16);
-        if (text.fontFamily == null || text.fontFamily.equals("unset")) {
+        if (text.usesDefaultFont()) {
             return normalLineHeight(text.fontSize);
         }
 
@@ -845,7 +852,7 @@ public class Text {
     public static double renderedAscent(Text text) {
         if (text == null) return 0;
         double rendered = text.renderedFontSize();
-        if (text.fontFamily == null || text.fontFamily.equals("unset")) {
+        if (text.usesDefaultFont()) {
             return rendered * 0.8d;
         }
         BrowserVerticalMetrics metrics = browserVerticalMetrics(text, rendered);
@@ -854,7 +861,7 @@ public class Text {
 
     private static BrowserVerticalMetrics browserVerticalMetrics(Text text, double fontSize) {
         if (text == null || fontSize <= 0 || !Double.isFinite(fontSize)
-                || text.fontFamily == null || text.fontFamily.equals("unset")) {
+                || text.usesDefaultFont()) {
             return null;
         }
         int fontStyle = java.awt.Font.PLAIN;
@@ -1035,7 +1042,7 @@ public class Text {
         int glyphCount = line.codePointCount(0, line.length());
         double letterSpacingWidth = glyphCount > 0 ? text.letterSpacing * glyphCount : 0;
 
-        if (text.fontFamily.equals("unset")) {
+        if (text.usesDefaultFont()) {
             return KuiServices.client().getDefaultFontWidth(line, text.isBold(), text.isOblique(), 0) * text.defaultFontScale() + text.strokeWidth * 2.0 + letterSpacingWidth;
         }
 

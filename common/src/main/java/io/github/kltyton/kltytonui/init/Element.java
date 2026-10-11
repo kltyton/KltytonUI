@@ -3368,7 +3368,7 @@ public class Element extends Node {
     }
 
     private static boolean usesDefaultFontBackend(Text text) {
-        return text.fontFamily == null || text.fontFamily.equals("unset");
+        return text.usesDefaultFont();
     }
 
     /**

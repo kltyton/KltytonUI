@@ -159,7 +159,7 @@ public class FontDrawer {
         String content = text.content;
         if (content == null || content.isEmpty()) return;
 
-        List<Text.TextShadow> shadows = text.fontFamily == null || "unset".equals(text.fontFamily)
+        List<Text.TextShadow> shadows = text.usesDefaultFont()
                 ? List.of() : text.textShadows;
         if (shadows != null && !shadows.isEmpty()) {
             Color previousColor = text.color;
@@ -187,7 +187,7 @@ public class FontDrawer {
     }
 
     private static void drawContent(PoseStack poseStack, Text text, String content, Position position, double baselineOffset) {
-        if (text.fontFamily == null || "unset".equals(text.fontFamily)) {
+        if (text.usesDefaultFont()) {
             drawDefaultFontLines(poseStack, text, content, position, baselineOffset);
         } else {
             drawCustomFontLines(poseStack, text, content, position, baselineOffset);

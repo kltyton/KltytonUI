@@ -119,6 +119,7 @@ For extension tags such as texture, sprite, and translation, see the [Extension 
 ## Text
 
 - ✅ font-family (@font-face + fallback chain), font-size, line-height, text-indent, letter-spacing, the six white-space values, **word-break (normal/break-all/keep-all, with basic CJK detection)**, text-overflow:ellipsis, line-clamp, direction;
+- When all declared families are missing, or the fallback chain cannot display a code point in the text, that text uses Minecraft's default font. Width, line-box baseline and drawing use the same backend. Available installed and registered fonts remain in use; font registration and resource reload refresh the fallback decision.
 - 🟡 font-weight (bolder/lighter map fixed to 700/300, not computed from the parent's weight); **font-style only honors oblique — italic does not trigger italics**; text-align's **justify is equivalent to start**; text-decoration only has underline/line-through;
 - ❌ font shorthand, text-shadow, text-transform, overflow-wrap, word-spacing;
 - Non-standard extensions: `selection-color` (selection color), `text-stroke` (text outline);
