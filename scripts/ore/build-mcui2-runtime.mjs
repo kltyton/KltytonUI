@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -79,6 +79,54 @@ const adaptVisualGallery = {
   },
 };
 
+const adaptAppSlot = {
+  name: 'kui-mcui-app-slot-block',
+  enforce: 'pre',
+  transform(source, id) {
+    if (id.includes('?') || !id.replaceAll('\\', '/').endsWith('/src/components/McApp/McApp.vue')) return;
+    const original = "if (!hasConfiguredDefaults(defaults)) return h('div', attrs, slots)";
+    if (!source.includes(original) || !source.includes("import { defineComponent, h, type VNode } from 'vue'")) {
+      throw new Error('McApp slot rendering changed upstream');
+    }
+    return source
+      .replace("import { defineComponent, h, type VNode } from 'vue'",
+        "import { defineComponent, h, openBlock, createBlock, renderSlot, type VNode } from 'vue'")
+      .replace(original, `if (!hasConfiguredDefaults(defaults)) {
+        openBlock()
+        return createBlock('div', attrs, [renderSlot(slots, 'default')], 14, ['dir'])
+      }`);
+  },
+};
+
+const adaptControlInteraction = {
+  name: 'kui-mcui-control-interaction',
+  enforce: 'pre',
+  transform(source, id) {
+    const path = id.split('?')[0].replaceAll(String.fromCharCode(92), '/');
+    if (path.endsWith('/src/components/McSelect/style.css')) {
+      if (source.trim() !== "@import './component.css';") throw new Error('McSelect style entry changed upstream');
+      source = readFileSync(resolve(dirname(path), 'component.css'), 'utf8');
+      const expanded = ".mc-select__trigger[aria-expanded='true'] {";
+      if (!source.includes(expanded)) throw new Error('McSelect expanded styling changed upstream');
+      return source.replace(expanded, ".mc-select__trigger[aria-expanded='true']:not(:disabled) {");
+    }
+    if (path.endsWith('/src/components/McSlider/style.css')) {
+      if (source.trim() !== "@import './component.css';") throw new Error('McSlider style entry changed upstream');
+      source = readFileSync(resolve(dirname(path), 'component.css'), 'utf8');
+      return source + `
+.mc-slider:not(.mc-slider--disabled):not(.mc-slider--readonly)
+  .mc-slider__input:active + .mc-slider__visual .mc-slider__fill {
+  transition: width 0s linear, height 0s linear;
+}
+.mc-slider:not(.mc-slider--disabled):not(.mc-slider--readonly)
+  .mc-slider__input:active + .mc-slider__visual .mc-slider__thumb {
+  transition: background-color var(--mc-motion-fast, 100ms) linear;
+}
+`;
+    }
+  },
+};
+
 async function bundle(entry, globalName, fileName, plugins = [], outDir = outputRoot) {
   await build({
     configFile: false,
@@ -97,7 +145,7 @@ async function bundle(entry, globalName, fileName, plugins = [], outDir = output
   });
 }
 
-await bundle('src/index.ts', 'McUIVue', 'mcui-oreui.kui', [excludeSkinViewer, vue()]);
+await bundle('src/index.ts', 'McUIVue', 'mcui-oreui.kui', [excludeSkinViewer, adaptAppSlot, adaptControlInteraction, vue()]);
 for (const [entry, globalName, fileName] of [
   ['src/icons/normal.ts', 'McUINormalIcons', 'mcui-icons-normal.kui'],
   ['src/icons/key.ts', 'McUIKeyIcons', 'mcui-icons-key.kui'],
@@ -115,12 +163,18 @@ mkdirSync(resolve(outputRoot, 'fonts'));
 for (const font of fonts) {
   copyFileSync(resolve(upstreamRoot, 'src/assets/fonts', font), resolve(outputRoot, 'fonts', font));
 }
-const fontStyles = readFileSync(resolve(upstreamRoot, 'src/styles/fonts.css'), 'utf8')
+let fontStyles = readFileSync(resolve(upstreamRoot, 'src/styles/fonts.css'), 'utf8')
   .replaceAll('../assets/fonts/', 'fonts/');
+for (const font of fonts) fontStyles = fontStyles.replaceAll(font, font.toLowerCase().replaceAll('-', '_'));
 writeFileSync(resolve(outputRoot, 'fonts.css'), fontStyles);
 
 const runtime = readFileSync(resolve(outputRoot, 'mcui-oreui.kui.iife.js'), 'utf8');
 const stylesheet = readFileSync(resolve(outputRoot, 'style.css'), 'utf8');
+const compactStyles = stylesheet.replace(/\s+/g, '');
+if (!compactStyles.includes('.mc-select__trigger[aria-expanded=true]:not(:disabled)')
+    || !compactStyles.includes('.mc-slider__fill{transition:width0slinear,height0slinear}')) {
+  throw new Error('Control interaction rules are missing from the generated CSS');
+}
 const gallery = readFileSync(resolve(outputRoot, 'gallery/gallery.kui.iife.js'), 'utf8');
 const retainedNames = componentNames.filter((name) => name !== 'McSkinViewer');
 if (runtime.includes('McSkinViewer') || retainedNames.some((name) => !runtime.includes(name))) {

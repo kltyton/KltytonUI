@@ -120,8 +120,9 @@ module.exports = {
         -Destination (Join-Path $runtime 'fonts.css') -Force
     foreach ($name in @('Minecraft-Ten.otf', 'Minecraft-Seven.otf',
             'Minecraft-Five.otf', 'Minecraft-Five-Bold.otf')) {
+        $targetName = $name.ToLowerInvariant().Replace('-', '_')
         Copy-Item -LiteralPath (Join-Path $bundle "fonts\$name") `
-            -Destination (Join-Path $fontTarget $name) -Force
+            -Destination (Join-Path $fontTarget $targetName) -Force
     }
     Write-Host "Refreshed mcui-oreui $actualCommit"
 } finally {
