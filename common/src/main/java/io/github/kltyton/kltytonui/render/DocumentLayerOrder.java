@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Orders top-level documents by the transforms applied to their root chain. */
 public final class DocumentLayerOrder {
@@ -18,7 +20,11 @@ public final class DocumentLayerOrder {
 
     public static List<Document> backToFront(Collection<Document> documents) {
         List<Document> ordered = copyNonNull(documents);
-        ordered.sort(Comparator.comparingDouble(DocumentLayerOrder::translateZ));
+        if (ordered.size() < 2) return ordered;
+        Map<Document, Double> translateZByDocument = new IdentityHashMap<>(ordered.size() * 2);
+        for (Document document : ordered) translateZByDocument.put(document, translateZ(document));
+        // List.sort retains registration order when documents share the same depth.
+        ordered.sort(Comparator.comparingDouble(translateZByDocument::get));
         return ordered;
     }
 

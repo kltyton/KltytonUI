@@ -224,6 +224,7 @@ public class Element extends Node {
     private boolean inlineStyleInitialized = false;
     private boolean mutableInlineStyleExposed = false;
     private boolean syncingInlineStyle = false;
+    private boolean updatingInlineStyle = false;
     private String inlineStyleAttributeSnapshot = null;
 
     public Style getStyle() {
@@ -590,22 +591,29 @@ public class Element extends Node {
     }
 
     public void updateInlineStyle() {
-        String rawAttributeValue = attributes.get("style");
-        String attributeValue = rawAttributeValue == null ? "" : rawAttributeValue;
-        inlineDeclarations = InlineStyleDeclaration.parseEntries(attributeValue);
-        Style previousStyle = inlineStyleSnapshot;
-        Style newStyle = Style.createInlineDeclarationStyle();
-        // CSSOM 视图取“最后一条声明”（如 el.style.color），按声明顺序覆盖、不按重要性折叠。
-        for (InlineStyleDeclaration.Entry entry : inlineDeclarations) {
-            newStyle.update(entry.property(), InlineStyleDeclaration.valueWithoutPriority(entry.value()));
+        // Length resolution can read the root style before this snapshot is committed.
+        if (updatingInlineStyle) return;
+        updatingInlineStyle = true;
+        try {
+            String rawAttributeValue = attributes.get("style");
+            String attributeValue = rawAttributeValue == null ? "" : rawAttributeValue;
+            inlineDeclarations = InlineStyleDeclaration.parseEntries(attributeValue);
+            Style previousStyle = inlineStyleSnapshot;
+            Style newStyle = Style.createInlineDeclarationStyle();
+            // CSSOM 视图取“最后一条声明”（如 el.style.color），按声明顺序覆盖、不按重要性折叠。
+            for (InlineStyleDeclaration.Entry entry : inlineDeclarations) {
+                newStyle.update(entry.property(), InlineStyleDeclaration.valueWithoutPriority(entry.value()));
+            }
+            inlineStyle.copyFrom(newStyle);
+            if (inlineStyleInitialized && isConnected()) {
+                RenderElement.observeStyle(this, previousStyle, inlineStyle);
+            }
+            inlineStyleSnapshot = inlineStyle.clone();
+            inlineStyleAttributeSnapshot = rawAttributeValue;
+            inlineStyleInitialized = true;
+        } finally {
+            updatingInlineStyle = false;
         }
-        inlineStyle.copyFrom(newStyle);
-        if (inlineStyleInitialized && isConnected()) {
-            RenderElement.observeStyle(this, previousStyle, inlineStyle);
-        }
-        inlineStyleSnapshot = inlineStyle.clone();
-        inlineStyleAttributeSnapshot = rawAttributeValue;
-        inlineStyleInitialized = true;
     }
 
     private void ensureInlineStyleInitialized() {
@@ -613,7 +621,7 @@ public class Element extends Node {
     }
 
     private void syncLegacyInlineStyleMutations() {
-        if (syncingInlineStyle) return;
+        if (syncingInlineStyle || updatingInlineStyle) return;
         ensureInlineStyleInitialized();
         String attributeValue = attributes.get("style");
         if (!Objects.equals(attributeValue, inlineStyleAttributeSnapshot)) {

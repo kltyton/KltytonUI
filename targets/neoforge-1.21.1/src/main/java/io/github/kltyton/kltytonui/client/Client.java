@@ -230,9 +230,9 @@ public class Client {
             DevTools.handleInspectMouseMove(getMousePositionDirectly());
             FrameTimingHud.beginFrame();
             try {
-                for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
-                    if (document == null || document.inWorld || document.isManuallyRendered()) continue;
-                    Base.drawOverlayDocument(event.getGuiGraphics().pose(), document);
+                Base.FlatLayerPlan flatLayers = Base.planFlatLayers();
+                for (Document document : flatLayers.orderedDocuments()) {
+                    Base.drawOverlayDocument(event.getGuiGraphics().pose(), document, flatLayers.baseZOf(document));
                     // Draw the resource preview right after its owning document so the
                     // previewed HTML stays below the DevTools tool document (and toasts).
                     io.github.kltyton.kltytonui.dev.resource.ResourcePreviewDialog.draw(event.getGuiGraphics().pose(), document);

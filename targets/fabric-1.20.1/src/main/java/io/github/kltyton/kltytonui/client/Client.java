@@ -13,7 +13,6 @@ import io.github.kltyton.kltytonui.layout.Position;
 import io.github.kltyton.kltytonui.layout.Size;
 import io.github.kltyton.kltytonui.loader.ClientLoader;
 import io.github.kltyton.kltytonui.render.Base;
-import io.github.kltyton.kltytonui.render.DocumentLayerOrder;
 import io.github.kltyton.kltytonui.render.FrameTimingHud;
 import io.github.kltyton.kltytonui.render.Operation;
 import io.github.kltyton.kltytonui.screen.KltytonContainerScreen;
@@ -102,9 +101,9 @@ public final class Client {
         DevTools.handleInspectMouseMove(mousePosition);
         FrameTimingHud.beginFrame();
         try {
-            for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
-                if (document == null || document.inWorld || document.isManuallyRendered()) continue;
-                Base.drawOverlayDocument(graphics.pose(), document);
+            Base.FlatLayerPlan flatLayers = Base.planFlatLayers();
+            for (Document document : flatLayers.orderedDocuments()) {
+                Base.drawOverlayDocument(graphics.pose(), document, flatLayers.baseZOf(document));
                 ResourcePreviewDialog.draw(graphics.pose(), document);
             }
             graphics.flush();

@@ -227,9 +227,9 @@ public class Client {
             DevTools.handleInspectMouseMove(getMousePositionDirectly());
             FrameTimingHud.beginFrame();
             try {
-                for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
-                    if (document == null || document.inWorld || document.isManuallyRendered()) continue;
-                    Base.drawOverlayDocument(event.getPoseStack(), document);
+                Base.FlatLayerPlan flatLayers = Base.planFlatLayers();
+                for (Document document : flatLayers.orderedDocuments()) {
+                    Base.drawOverlayDocument(event.getPoseStack(), document, flatLayers.baseZOf(document));
                     io.github.kltyton.kltytonui.dev.resource.ResourcePreviewDialog.draw(event.getPoseStack(), document);
                 }
                 Minecraft.getInstance().renderBuffers().bufferSource().endBatch();

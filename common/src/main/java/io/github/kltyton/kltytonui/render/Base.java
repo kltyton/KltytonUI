@@ -21,8 +21,10 @@ import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import io.github.kltyton.kltytonui.style.Transform;
 import io.github.kltyton.kltytonui.parser.CSS;
@@ -92,19 +94,24 @@ public class Base {
      */
     public static void drawPersistentScreenDocuments(PoseStack poseStack, Document owner) {
         boolean nativeDepthPending = owner == null;
-        for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
-            if (!isFlatDocument(document) || document == owner || !document.isReloadPersistent()) continue;
+        FlatLayerPlan flatLayers = planFlatLayers();
+        for (Document document : flatLayers.orderedDocuments()) {
+            if (document == owner || !document.isReloadPersistent()) continue;
             if (nativeDepthPending) {
                 commitDraws();
                 KuiServices.render().clearDepthBuffer();
                 nativeDepthPending = false;
             }
-            drawOverlayDocument(poseStack, document);
+            drawOverlayDocument(poseStack, document, flatLayers.baseZOf(document));
             io.github.kltyton.kltytonui.dev.resource.ResourcePreviewDialog.draw(poseStack, document);
         }
     }
 
     public static void drawOverlayDocument(PoseStack poseStack, Document document) {
+        drawOverlayDocument(poseStack, document, resolveFlatDocumentBaseZ(document));
+    }
+
+    public static void drawOverlayDocument(PoseStack poseStack, Document document, float baseZ) {
         if (document == null) return;
         try (Document.ContextScope ignored = Document.withContext(document)) {
             KltytonViewport viewport = document.getViewport();
@@ -116,7 +123,7 @@ public class Base {
                 // 坐标系，只有元素 CSS transform 的局部增量会作用于它。
                 Mask.pushScissorScale(viewport.scissorScale(), poseStack);
                 try {
-                    drawFlatDocumentInContext(poseStack, document, List.of());
+                    drawFlatDocumentAtZInContext(poseStack, document, List.of(), baseZ);
                 } finally {
                     Mask.popScissorScale();
                 }
@@ -124,6 +131,42 @@ public class Base {
                 poseStack.popPose();
             }
         }
+    }
+
+    /** Document order and depth values shared by one flat composition pass. */
+    public static final class FlatLayerPlan {
+        private final List<Document> orderedDocuments;
+        private final Map<Document, Float> baseZByDocument;
+
+        private FlatLayerPlan(List<Document> orderedDocuments) {
+            this.orderedDocuments = orderedDocuments;
+            this.baseZByDocument = new IdentityHashMap<>(orderedDocuments.size() * 2);
+            for (int layer = 0; layer < orderedDocuments.size(); layer++) {
+                baseZByDocument.put(orderedDocuments.get(layer),
+                        GLOBAL_DOCUMENT_Z_OFFSET + layer * FLAT_DOCUMENT_LAYER_STEP);
+            }
+        }
+
+        public List<Document> orderedDocuments() {
+            return orderedDocuments;
+        }
+
+        public float baseZOf(Document document) {
+            Float baseZ = baseZByDocument.get(document);
+            return baseZ != null ? baseZ : GLOBAL_DOCUMENT_Z_OFFSET;
+        }
+
+        public float overlayZ() {
+            return GLOBAL_DOCUMENT_Z_OFFSET + orderedDocuments.size() * FLAT_DOCUMENT_LAYER_STEP;
+        }
+    }
+
+    public static FlatLayerPlan planFlatLayers() {
+        List<Document> flat = new ArrayList<>();
+        for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
+            if (isFlatDocument(document)) flat.add(document);
+        }
+        return new FlatLayerPlan(flat);
     }
 
     public static void drawScreenDocument(PoseStack poseStack, Document document) {

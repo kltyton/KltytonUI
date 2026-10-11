@@ -11,7 +11,6 @@ import io.github.kltyton.kltytonui.dev.resource.ResourcePreviewDialog;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.neoforge.RenderService;
 import io.github.kltyton.kltytonui.render.Base;
-import io.github.kltyton.kltytonui.render.DocumentLayerOrder;
 import io.github.kltyton.kltytonui.render.Mask;
 import io.github.kltyton.kltytonui.render.RenderNode;
 import io.github.kltyton.kltytonui.style.Cursor;
@@ -115,9 +114,9 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
             PoseStack guiPose = new PoseStack();
             if (renderState.mode() == KltytonUiPipRenderState.Mode.UI) {
                 Mask.resetDepth();
-                for (Document document : DocumentLayerOrder.backToFront(Document.getAll())) {
-                    if (document == null || document.inWorld || document.isManuallyRendered()) continue;
-                    Base.drawOverlayDocument(guiPose, document);
+                Base.FlatLayerPlan flatLayers = Base.planFlatLayers();
+                for (Document document : flatLayers.orderedDocuments()) {
+                    Base.drawOverlayDocument(guiPose, document, flatLayers.baseZOf(document));
                     // Resource previews are intentionally excluded from the
                     // normal document pass and draw themselves inside the owner's
                     // viewport. Draw them right after the owner so the previewed
@@ -128,7 +127,7 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
                 // must not inherit the final document's clip or stencil state.
                 Mask.resetDepth();
                 guiPose.pushPose();
-                guiPose.translate(0.0F, 0.0F, Base.getFlatOverlayZ());
+                guiPose.translate(0.0F, 0.0F, flatLayers.overlayZ());
                 try {
                     for (KltytonUiPipRenderState.FloatingItem item : renderState.floatingItems().items()) {
                         RenderNode.ItemNode.positioned(
