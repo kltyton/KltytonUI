@@ -60,6 +60,7 @@ tasks.register('prepareCommonSources', Sync) {
         exclude 'io/github/kltyton/kltytonui/render/ImageRegionCopy.java'
         // Rhino 1802 在 Scriptable/SymbolScriptable 和 ScriptRuntime 中不使用现代版的 Context 参数。
         exclude 'io/github/kltyton/kltytonui/script/ecmascript/EcmaProxyObject.java'
+        exclude 'io/github/kltyton/kltytonui/script/ecmascript/EcmaReflectGet.java'
         exclude 'io/github/kltyton/kltytonui/script/host/RhinoHostObject.java'
         exclude 'io/github/kltyton/kltytonui/script/StandaloneRhinoRuntime.java'
     }
