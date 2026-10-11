@@ -34,10 +34,10 @@ class VueBundleCompatibilityTest {
         ScriptableObject scope = initializedScope(context);
         context.evaluateString(scope, vue, "vue.kui.js", 1, null);
         assertNotEquals(dev.latvian.mods.rhino.Scriptable.NOT_FOUND,
-                ScriptableObject.getProperty(scope, "Vue", context));
+                RhinoTestSupport.getProperty(context, scope, "Vue"));
         context.evaluateString(scope, mcui, "mcui-oreui.kui.js", 1, null);
         assertNotEquals(dev.latvian.mods.rhino.Scriptable.NOT_FOUND,
-                ScriptableObject.getProperty(scope, "McUIVue", context));
+                RhinoTestSupport.getProperty(context, scope, "McUIVue"));
     }
 
     @Test
@@ -157,12 +157,12 @@ class VueBundleCompatibilityTest {
         CountDownLatch updated = new CountDownLatch(1);
         Context context = RhinoTestSupport.enterContext();
         ScriptableObject scope = context.initStandardObjects();
-        ScriptableObject.putProperty(scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document), context);
-        ScriptableObject.putProperty(scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window), context);
-        ScriptableObject.putProperty(scope, "__auiUpdated",
-                RhinoTestSupport.wrap(context, scope, updated), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
+                RhinoTestSupport.wrap(context, scope, document));
+        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
+                RhinoTestSupport.wrap(context, scope, Window.window));
+        RhinoTestSupport.putProperty(context, scope, "__auiUpdated",
+                RhinoTestSupport.wrap(context, scope, updated));
         String bootstrap = Loader.readGlobalJS()
                 .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
                         "let document = __auiTestDocument;")
@@ -187,7 +187,7 @@ class VueBundleCompatibilityTest {
 
     private static ScriptableObject initializedScope(Context context) throws Exception {
         ScriptableObject scope = context.initStandardObjects();
-        ScriptableObject.putProperty(scope, "window", RhinoTestSupport.wrap(context, scope, Window.window), context);
+        RhinoTestSupport.putProperty(context, scope, "window", RhinoTestSupport.wrap(context, scope, Window.window));
         context.evaluateString(scope, read(ECMASCRIPT), "ecmascript.js", 1, null);
         assertEquals("function|object|function|function", context.evaluateString(scope,
                 "typeof Proxy + '|' + typeof Reflect + '|' + typeof Promise + '|' + typeof queueMicrotask",

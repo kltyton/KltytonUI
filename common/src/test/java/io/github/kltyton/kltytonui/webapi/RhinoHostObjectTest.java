@@ -31,9 +31,9 @@ class RhinoHostObjectTest {
         ScriptableObject scope = context.initStandardObjects();
         Object wrappedDocument = RhinoTestSupport.wrap(context, scope, document);
         assertEquals(RhinoHostObject.class, wrappedDocument.getClass());
-        ScriptableObject.putProperty(scope, "__auiTestDocument", wrappedDocument, context);
-        ScriptableObject.putProperty(scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument", wrappedDocument);
+        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
+                RhinoTestSupport.wrap(context, scope, Window.window));
         String bootstrap = Loader.readGlobalJS()
                 .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
                         "let document = __auiTestDocument;")
@@ -56,7 +56,7 @@ class RhinoHostObjectTest {
         ScriptableObject scope = context.initStandardObjects();
         Scriptable delegate = (Scriptable) RhinoTestSupport.wrap(context, scope, element);
         RhinoHostObject host = new RhinoHostObject(element, delegate, scope);
-        ScriptableObject.putProperty(scope, "host", host, context);
+        RhinoTestSupport.putProperty(context, scope, "host", host);
 
         Object result = context.evaluateString(scope,
                 "var first = Symbol('same'); var second = Symbol('same');"
@@ -105,7 +105,7 @@ class RhinoHostObjectTest {
         ScriptableObject scope = context.initStandardObjects();
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            ScriptableObject.putProperty(scope, "host", RhinoTestSupport.wrap(context, scope, parent), context);
+            RhinoTestSupport.putProperty(context, scope, "host", RhinoTestSupport.wrap(context, scope, parent));
             result = context.evaluateString(scope,
                     "var nestedHost = host.child(); nestedHost._vnode = 'cached';"
                             + "nestedHost._vnode + '|' + (nestedHost === host.child());",
@@ -124,7 +124,7 @@ class RhinoHostObjectTest {
         ScriptableObject scope = context.initStandardObjects();
         Scriptable delegate = (Scriptable) RhinoTestSupport.wrap(context, scope, input);
         RhinoHostObject host = new RhinoHostObject(input, delegate, scope);
-        ScriptableObject.putProperty(scope, "host", host, context);
+        RhinoTestSupport.putProperty(context, scope, "host", host);
 
         try (Document.ContextScope ignored = Document.withContext(document)) {
             assertEquals("string|123", context.evaluateString(scope,
@@ -184,7 +184,7 @@ class RhinoHostObjectTest {
             }
         });
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            ScriptableObject.putProperty(scope, "target", RhinoTestSupport.wrap(context, scope, target), context);
+            RhinoTestSupport.putProperty(context, scope, "target", RhinoTestSupport.wrap(context, scope, target));
             context.evaluateString(scope,
                     "var testGlobal = this;"
                             + "var dispatchThis, dispatchCurrentTarget, ordinaryValue, ordinaryThis;"

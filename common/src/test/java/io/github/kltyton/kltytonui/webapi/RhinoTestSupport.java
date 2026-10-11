@@ -133,6 +133,23 @@ public final class RhinoTestSupport {
         }
     }
 
+    /** {@code ScriptableObject.getProperty(scope, name, context)}; falls back to the 1.18.2 2-arg form. */
+    static Object getProperty(Context context, Scriptable scope, String name) {
+        try {
+            return ScriptableObject.class.getMethod("getProperty", Scriptable.class, String.class, Context.class)
+                    .invoke(null, scope, name, context);
+        } catch (NoSuchMethodException ignored) {
+            try {
+                return ScriptableObject.class.getMethod("getProperty", Scriptable.class, String.class)
+                        .invoke(null, scope, name);
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException("Unable to get property '" + name + "' for Rhino", exception);
+            }
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Unable to get property '" + name + "' for Rhino", exception);
+        }
+    }
+
     /** 1.18.2 的那些入口首参是 SharedContextData，1.19+ 是 Context；按形参类型决定传哪个。 */
     private static Object contextArgument(Method method, Context context, Scriptable scope) {
         Class<?> firstParameter = method.getParameterTypes()[0];

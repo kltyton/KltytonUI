@@ -239,8 +239,8 @@ class McUiComponentCompatibilityTest {
         Context context = RhinoTestSupport.enterContext();
         ScriptableObject scope = browserScope(context, document);
         CountDownLatch updated = new CountDownLatch(1);
-        ScriptableObject.putProperty(scope, "__auiUpdated",
-                RhinoTestSupport.wrap(context, scope, updated), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiUpdated",
+                RhinoTestSupport.wrap(context, scope, updated));
 
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
@@ -319,8 +319,8 @@ class McUiComponentCompatibilityTest {
         Context context = RhinoTestSupport.enterContext();
         ScriptableObject scope = browserScope(context, document);
         CountDownLatch completed = new CountDownLatch(1);
-        ScriptableObject.putProperty(scope, "__auiPixelDone",
-                RhinoTestSupport.wrap(context, scope, completed), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiPixelDone",
+                RhinoTestSupport.wrap(context, scope, completed));
 
         try (Document.ContextScope ignored = Document.withContext(document)) {
             load(context, scope, "mcui/mcui-oreui.kui.js");
@@ -378,10 +378,10 @@ class McUiComponentCompatibilityTest {
     private static ScriptableObject browserScope(Context context, Document document) throws Exception {
         ScriptableObject scope = context.initStandardObjects();
         KuiServices.setScript(new RhinoTestScriptService(context, scope));
-        ScriptableObject.putProperty(scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document), context);
-        ScriptableObject.putProperty(scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
+                RhinoTestSupport.wrap(context, scope, document));
+        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
+                RhinoTestSupport.wrap(context, scope, Window.window));
         String bootstrap = Loader.readGlobalJS()
                 .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
                         "let document = __auiTestDocument;")

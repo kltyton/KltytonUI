@@ -262,10 +262,10 @@ class WindowApiTest {
         Document document = TestDocumentFactory.createDocument();
         Context context = RhinoTestSupport.enterContext();
         ScriptableObject scope = context.initStandardObjects();
-        ScriptableObject.putProperty(scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document), context);
-        ScriptableObject.putProperty(scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window), context);
+        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
+                RhinoTestSupport.wrap(context, scope, document));
+        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
+                RhinoTestSupport.wrap(context, scope, Window.window));
 
         String bootstrap = Loader.readGlobalJS()
                 .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
