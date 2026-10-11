@@ -32,6 +32,8 @@ public final class VarResolver {
                 String value = (String) field.get(style);
                 if (value == null || !value.contains("var(")) continue;
                 String resolved = resolveVarInValue(style, value, context, 0);
+                // An unresolved text color is invalid at computed-value time and inherits.
+                if (field.getName().equals("color") && resolved.contains("var(")) resolved = "unset";
                 if (!resolved.equals(value)) {
                     field.set(style, resolved);
                 }
