@@ -6,6 +6,7 @@ import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.loader.Loader;
 import io.github.kltyton.kltytonui.parser.JS;
+import io.github.kltyton.kltytonui.script.ecmascript.EcmaReflectGet;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
 import io.github.kltyton.kltytonui.script.host.RhinoHostObject;
 import io.github.kltyton.kltytonui.spi.KuiServices;
@@ -95,6 +96,7 @@ public final class StandaloneRhinoRuntime {
             try {
                 Window.window.beginScriptTask();
                 compiledGlobalScript(context, code).exec(context, scope);
+                EcmaReflectGet.install(context, scope);
             } catch (RuntimeException exception) {
                 KltytonUI.LOGGER.error(
                         "[KUI JS] global script execution failed document={} code={}",

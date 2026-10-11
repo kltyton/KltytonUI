@@ -47,9 +47,9 @@ public final class EcmaProxyObject extends ScriptableObject {
     private Object get(Context context, Object key, Scriptable start) {
         Callable trap = trap(context, "get");
         if (trap != null) {
-            return call(context, trap, target, trapPropertyKey(key), receiver(start));
+            return call(context, trap, target, trapPropertyKey(key), start);
         }
-        return getTarget(context, key);
+        return EcmaReflectGet.getProperty(context, target, key, start);
     }
 
     @Override
