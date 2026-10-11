@@ -11,7 +11,6 @@ import dev.latvian.mods.rhino.Scriptable;
 import dev.latvian.mods.rhino.ScriptableObject;
 import dev.latvian.mods.rhino.Symbol;
 import dev.latvian.mods.rhino.SymbolScriptable;
-import dev.latvian.mods.rhino.Undefined;
 
 /** Uses Rhino's receiver-aware property slots without allocating JavaScript descriptors. */
 public final class EcmaReflectGet extends BaseFunction {
@@ -43,14 +42,14 @@ public final class EcmaReflectGet extends BaseFunction {
 
     @Override
     public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
-        Object target = args.length == 0 ? Undefined.INSTANCE : args[0];
+        Object target = args.length == 0 ? Context.getUndefinedValue() : args[0];
         Object receiver = args.length < 3 ? target : args[2];
         // Java host descriptors and primitive receivers use the existing host conversion contract.
         if (!(target instanceof NativeObject || target instanceof NativeArray || target instanceof EcmaProxyObject)
                 || !(receiver instanceof Scriptable start)) {
             return descriptorGetter.call(context, scope, thisObj, args);
         }
-        Object key = args.length < 2 ? Undefined.INSTANCE : args[1];
+        Object key = args.length < 2 ? Context.getUndefinedValue() : args[1];
         return getProperty(context, (Scriptable) target, key, start);
     }
 
@@ -70,6 +69,6 @@ public final class EcmaReflectGet extends BaseFunction {
             }
             if (value != Scriptable.NOT_FOUND) return value;
         }
-        return Undefined.INSTANCE;
+        return Context.getUndefinedValue();
     }
 }
