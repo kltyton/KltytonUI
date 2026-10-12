@@ -72,7 +72,6 @@ public interface RenderNode {
 
     static void ensureRendererLoaded(Element target) {
         if (target == null || target.isLoaded) return;
-        target.resetRenderer();
         target.isLoaded = true;
     }
 

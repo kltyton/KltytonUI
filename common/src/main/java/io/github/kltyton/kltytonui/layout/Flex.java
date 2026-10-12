@@ -675,7 +675,7 @@ public class Flex {
                 double outer = resolveAssignedMainSize(element, parent,
                         contentWidth + horizontalBox + box.getMarginHorizontal());
                 contentWidth = Math.max(0, outer - box.getMarginHorizontal() - horizontalBox);
-                mainSizeAssigned = Math.abs(contentWidth - previousWidth) > 0.0001d;
+                mainSizeAssigned = true;
                 if (heightAuto && !shouldStretchCrossAxis(element, parent)
                         && Math.abs(contentWidth - previousWidth) > 0.0001d) {
                     Size constrained = Size.naturalAtContentWidth(element, contentWidth);

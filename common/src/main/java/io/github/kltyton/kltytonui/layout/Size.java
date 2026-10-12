@@ -625,11 +625,13 @@ public record Size(double width, double height) {
             }
         }
 
+        double unassignedContentWidth = contentWidth;
         Flex.ItemUsedSize flexItemSize = Flex.resolveItemUsedSize(element, box,
                 contentWidth, contentHeight, unsetWidth, unsetHeight,
                 horizontalBox, verticalBox, flexParentHeight, allowFlexAdjustments);
         contentWidth = flexItemSize.contentWidth();
         contentHeight = flexItemSize.contentHeight();
+        boolean flexMainWidthChanged = Math.abs(contentWidth - unassignedContentWidth) > 0.0001d;
         Double flexGrow = parseNumber(style.flexGrow);
         if (intrinsicWidthKeyword && intrinsicKeywordSize != null
                 && (flexGrow == null || flexGrow <= 0.0d)) {
@@ -668,7 +670,7 @@ public record Size(double width, double height) {
                 && unsetHeight && !flexMainSizeAssigned) {
             contentHeight = aspectHeightFromWidth(contentWidth, aspectRatio, borderBox, horizontalBox, verticalBox);
         }
-        if (unsetHeight && !insetResolvedHeight && !flexMainSizeAssigned && !flexCrossHeightStretched
+        if (unsetHeight && !insetResolvedHeight && !flexMainWidthChanged && !flexCrossHeightStretched
                 && !parentAssignsColumnMainSize
                 && (!intrinsicMeasurement || naturalWidthConstraint != null)
                 && !(element instanceof AbstractText)
@@ -827,11 +829,8 @@ public record Size(double width, double height) {
             Size cachedSize = current.getRenderer().size.get();
             boolean hasUsableSize = false;
             if (cachedSize != null) {
-                double innerWidth = Box.of(current).innerSize().width();
-                if (innerWidth > 0) {
-                    scaleWidth = innerWidth;
-                    hasUsableSize = true;
-                }
+                scaleWidth = Box.of(current).innerSize().width();
+                hasUsableSize = true;
             }
 
             if (!hasUsableSize) {
@@ -919,11 +918,8 @@ public record Size(double width, double height) {
             Size cachedSize = current.getRenderer().size.get();
             boolean hasUsableSize = false;
             if (cachedSize != null) {
-                double innerHeight = Box.of(current).innerSize().height();
-                if (innerHeight > 0) {
-                    scaleHeight = innerHeight;
-                    hasUsableSize = true;
-                }
+                scaleHeight = Box.of(current).innerSize().height();
+                hasUsableSize = true;
             }
             if (!hasUsableSize) {
                 Style currentStyle = current.getRawComputedStyle();
@@ -1198,7 +1194,7 @@ public record Size(double width, double height) {
         if (hasDefiniteAutoResolvedWidthInternal(parent)) return true;
         if (isNaturalMeasurementContext()) return false;
         Size used = parent.getRenderer().size.get();
-        return used != null && used.width() > 0;
+        return used != null;
     }
 
     private static boolean shouldUseContentBasedAutoWidthInNaturalFlexMeasurement(Element element, boolean allowFlexAdjustments) {
