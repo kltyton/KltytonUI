@@ -6,6 +6,7 @@ import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.style.Style;
 import io.github.kltyton.kltytonui.style.StyleFrameCache;
+import io.github.kltyton.kltytonui.render.Drawer;
 
 import java.util.*;
 import io.github.kltyton.kltytonui.parser.Color;
@@ -142,13 +143,12 @@ public record Transition(String name, double start, double end, double duration,
 
     private static void cancel(Element element) {
         if (element == null) return;
-        boolean cancelledActiveTransition;
+        List<Transition> cancelled;
         synchronized (LOCK) {
-            List<Transition> removed = workList.remove(element.uuid);
-            cancelledActiveTransition = removed != null && !removed.isEmpty();
+            cancelled = workList.remove(element.uuid);
         }
-        if (cancelledActiveTransition) {
-            invalidateCancelledTransitionCaches(element);
+        if (cancelled != null && !cancelled.isEmpty()) {
+            invalidateCancelledTransitionCaches(element, cancelled);
         }
         if (element.document != null) {
             element.document.setTransitionActive(element, false);
@@ -161,16 +161,28 @@ public record Transition(String name, double start, double end, double duration,
      * that transition must invalidate its committed geometry; otherwise the
      * prior transform remains drawable even though the raw style has won.
      */
-    private static void invalidateCancelledTransitionCaches(Element element) {
-        element.forEachRoute(routeElement -> {
-            var renderer = routeElement.getRenderer();
-            renderer.invalidateLayoutVersion();
-            renderer.size.clear();
-            renderer.box.clear();
-            renderer.position.clear();
-        });
+    private static void invalidateCancelledTransitionCaches(Element element, List<Transition> cancelled) {
+        boolean layoutChanged = cancelled.stream().anyMatch(transition -> isLayoutProperty(transition.name));
+        boolean transformChanged = cancelled.stream().anyMatch(transition -> "transform".equals(transition.name));
+        boolean rectChanged = cancelled.stream().anyMatch(transition -> isRectProperty(transition.name));
+        boolean compositingChanged = cancelled.stream().anyMatch(transition -> "opacity".equals(transition.name)
+                || transition.name.startsWith("filter-"));
+        if (layoutChanged) {
+            element.forEachRoute(routeElement -> {
+                var renderer = routeElement.getRenderer();
+                renderer.invalidateLayoutVersion();
+                renderer.size.clear();
+                renderer.box.clear();
+                renderer.position.clear();
+            });
+        }
+        StyleFrameCache.invalidate(element);
 
         var renderer = element.getRenderer();
+        if (rectChanged && !layoutChanged) {
+            renderer.clearVisualBoxCache();
+            renderer.invalidateStyleVersion();
+        }
         renderer.invalidateTransformVersion();
         renderer.transform.clear();
         renderer.opacity.clear();
@@ -179,6 +191,13 @@ public record Transition(String name, double start, double end, double duration,
         renderer.background.clear();
         renderer.text.clear();
         renderer.wrappedText.clear();
+        if (element.document != null) {
+            int dirty = Drawer.REPAINT;
+            if (layoutChanged) dirty |= Drawer.RELAYOUT | Drawer.HITTEST;
+            else if (transformChanged || rectChanged) dirty |= Drawer.COMMIT_LAYOUT | Drawer.HITTEST;
+            if (compositingChanged) dirty |= Drawer.REORDER;
+            element.document.markDirty(element, dirty);
+        }
     }
 
     private static boolean hasSameTransitionTargets(List<Transition> existing, List<Transition> next) {
