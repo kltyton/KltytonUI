@@ -205,6 +205,31 @@ public final class Grid {
         return self == Align.STRETCH;
     }
 
+    /** Fixed-minimum columns allocate width without consulting item text. */
+    static boolean hasContentIndependentWidthAllocation(Element item) {
+        Element parent = item.parentElement;
+        Style parentStyle = parent.getComputedStyle();
+        Style itemStyle = item.getComputedStyle();
+        if ("TR".equalsIgnoreCase(parent.tagName) || !Layout.isInFlow(itemStyle)) return false;
+        if (!isGridStretch(parentStyle.justifyItems, itemStyle.justifySelf)
+                && itemStyle.widthLength().resolve(1, item) == null) return false;
+        Size used = parent.getRenderer().size.get();
+        if (used == null) return false;
+        Gaps gaps = parseGaps(parentStyle);
+        List<Track> columns = parseTracks(parentStyle.gridTemplateColumns, 1,
+                Box.of(parent).innerSize().width(), gaps.colGap).tracks();
+        for (Track track : columns) {
+            if (track.type == TrackType.FIXED) continue;
+            if (track.type != TrackType.MINMAX || track.minTrack.type != TrackType.FIXED
+                    || !(track.maxTrack.type == TrackType.FIXED || track.maxTrack.type == TrackType.FR)) return false;
+        }
+        for (Element child : collectFlowChildren(parent.getRenderChildren())) {
+            SpanSpec column = parseSpanSpec(child.getComputedStyle().gridColumn);
+            if (column.start >= 0 || column.span != 1) return false;
+        }
+        return true;
+    }
+
     public static Size computeContentSize(Element gridContainer) {
         GridLayout layout = getOrComputeLayout(gridContainer, gridContainer.getRenderChildren());
         if (layout.flow.isEmpty()) return Size.ZERO;

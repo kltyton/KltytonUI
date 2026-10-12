@@ -129,6 +129,7 @@ public class RenderElement {
     private Matrix4f committedWorldTransform = null;
     private long styleVersion = 1L;
     private long textVersion = 1L;
+    private long textContentVersion = 1L;
     private long layoutVersion = 1L;
     private long scrollVersion = 1L;
     private long transformVersion = 1L;
@@ -212,12 +213,12 @@ public class RenderElement {
     }
 
     /**
-     * Version of text styling inherited by this element's layout objects.
+     * Version of this layout owner's text content and inherited text styling.
      * Text runs are stored inside normal/flex layout results, so their cache
      * dependency must be separate from geometry and hit-test dependencies.
      */
     public long textDependency() {
-        long value = 17L;
+        long value = mix(17L, textContentVersion);
         for (Element routeElement : element.getRouteArray()) {
             value = mix(value, routeElement.getRenderer().textVersion);
         }
@@ -272,6 +273,10 @@ public class RenderElement {
 
     public void invalidateTextVersion() {
         textVersion++;
+    }
+
+    public void invalidateTextContentVersion() {
+        textContentVersion++;
     }
 
     public void invalidateScrollVersion() {
@@ -629,7 +634,7 @@ public class RenderElement {
         }
 
         if (localGeometryChanged || localFlowChange) {
-            if (localFlowChange) element.parentElement.getRenderer().invalidateTextVersion();
+            if (localFlowChange) element.parentElement.getRenderer().invalidateTextContentVersion();
             renderer.size.clear();
             renderer.box.clear();
             renderer.position.clear();
@@ -706,13 +711,15 @@ public class RenderElement {
 
     private static boolean preservesNormalFlowContribution(Element element, Style origin, Style current) {
         Element parent = element.parentElement;
+        Style parentStyle = parent == null ? null : parent.getComputedStyle();
         Rect previous = element.getRenderer().getCommittedRect();
-        if (parent == null || previous == null || parent.getRenderer().getCommittedRectIfValid() == null
+        if (parent == null || previous == null || parent.getRenderer().getCommittedRect() == null
+                || parent.getRenderer().size.get() == null || parent.hasDirtyFlag(Drawer.RELAYOUT | Drawer.REORDER)
                 || element.hasDirtyFlag(Drawer.RELAYOUT)
                 || !"flex".equals(origin.display) || !"flex".equals(current.display)
                 || !origin.isBorderBox() || !current.isBorderBox()
                 || !Layout.isInFlow(origin) || !Layout.isInFlow(current)
-                || !"block".equals(parent.getComputedStyle().display)
+                || !"block".equals(parentStyle.display)
                 || origin.clipsOverflow() || current.clipsOverflow()) return false;
         for (String property : LAYOUT_PROPS) {
             if (!"marginTop".equals(property) && !Objects.equals(origin.get(property), current.get(property))) return false;

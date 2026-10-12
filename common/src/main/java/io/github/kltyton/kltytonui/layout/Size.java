@@ -863,6 +863,32 @@ public record Size(double width, double height) {
         return nearestScaleWidth;
     }
 
+    /** Whether changing descendant text can affect this containing width. */
+    public static boolean hasContentIndependentWidth(Element element) {
+        for (Element current = element; current != null; current = current.parentElement) {
+            Style style = current.getComputedStyle();
+            Element parent = current.parentElement;
+            Style parentStyle = parent == null ? null : parent.getComputedStyle();
+            boolean columnCrossAllocation = false;
+            if (parentStyle != null && Layout.isFlexDisplay(parentStyle.display)) {
+                Flex flex = Flex.of(parent);
+                columnCrossAllocation = flex.flexDirection.contains("column") && flex.flexWrap.is("nowrap")
+                        && style.widthLength().resolve(1, current) != null;
+                if (!columnCrossAllocation) return false;
+            }
+            if (!style.width.contains("%") && style.widthLength().resolve(0, current) != null) return true;
+            if (isIntrinsicWidthKeyword(style.width) || !Layout.isInFlow(style)) return false;
+            if (parent == null) return current.document != null && current == current.document.documentElement;
+            if (Layout.isGridDisplay(parentStyle.display)) {
+                if (!Grid.hasContentIndependentWidthAllocation(current)) return false;
+            } else if (!columnCrossAllocation) {
+                if (!"block".equals(parentStyle.display)
+                        || !("block".equals(style.display) || "flex".equals(style.display) || "grid".equals(style.display))) return false;
+            }
+        }
+        return false;
+    }
+
     /**
      * CSS 2.1 §10.4：已用宽度受 min-/max-width 钳制。{@link #getScaleWidth} 在这里推导的是"祖先
      * 自身还没有可用的已用尺寸时"的包含块宽度；不钳制的话 {@code width:100%;max-width:1240px} 的

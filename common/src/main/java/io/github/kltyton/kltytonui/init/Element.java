@@ -1809,6 +1809,8 @@ public class Element extends Node {
         boolean removedChildren = !childNodes.isEmpty();
         boolean sameTextGeometry = document != null && isConnected() && !removedChildren && !Objects.equals(oldValue, normalized)
                 && Text.preservesLeafTokenGeometry(this, oldValue, normalized);
+        Element textLayoutRoot = !sameTextGeometry && !removedChildren && document != null
+                && isConnected() && !Objects.equals(oldValue, normalized) ? findDefiniteTextLayoutRoot() : null;
         if (!childNodes.isEmpty()) {
             ArrayList<Node> snapshot = new ArrayList<>(childNodes);
             for (Node child : snapshot) {
@@ -1829,8 +1831,18 @@ public class Element extends Node {
             if (sameTextGeometry) {
                 // Flow objects retain text runs; refresh those snapshots without
                 // invalidating unchanged intrinsic and used sizes along the route.
-                forEachRoute(element -> element.getRenderer().invalidateTextVersion());
+                forEachRoute(element -> element.getRenderer().invalidateTextContentVersion());
                 document.markDirty(this, Drawer.REPAINT);
+                document.queueMutation(Document.MutationRecord.characterData(this, oldValue));
+                return;
+            }
+            if (textLayoutRoot != null) {
+                textLayoutRoot.getRenderer().invalidateLayoutSubtree();
+                for (Element current = this; current != null; current = current.parentElement) {
+                    current.getRenderer().invalidateTextContentVersion();
+                    if (current == textLayoutRoot) break;
+                }
+                document.markDirty(textLayoutRoot, Drawer.COMMIT_LAYOUT | Drawer.REPAINT | Drawer.HITTEST);
                 document.queueMutation(Document.MutationRecord.characterData(this, oldValue));
                 return;
             }
@@ -1853,6 +1865,26 @@ public class Element extends Node {
             document.markDirty(this, dirtyMask);
             document.queueMutation(Document.MutationRecord.characterData(this, oldValue));
         }
+    }
+
+    private Element findDefiniteTextLayoutRoot() {
+        for (Element current = this; current.parentElement != null; current = current.parentElement) {
+            Style currentStyle = current.getComputedStyle();
+            Element parent = current.parentElement;
+            if (!Layout.isInFlow(currentStyle) || current.hasDirtyFlag(Drawer.RELAYOUT | Drawer.REORDER)
+                    || !("block".equals(currentStyle.display) || "flex".equals(currentStyle.display)
+                    || "grid".equals(currentStyle.display))
+                    || !"block".equals(parent.getComputedStyle().display)
+                    || current.mayRenderScrollbar() || currentStyle.height.contains("%")
+                    || currentStyle.heightLength().resolve(0, current) == null
+                    || currentStyle.widthLength().resolve(1, current) == null
+                    || !Size.hasContentIndependentWidth(current)
+                    || parent.getRenderer().getCommittedRect() == null
+                    || parent.getRenderer().size.get() == null) continue;
+            if (current.getRenderer().getCommittedRect() != null && current.getRenderer().size.get() != null
+                    || current.hasDirtyFlag(Drawer.COMMIT_LAYOUT)) return current;
+        }
+        return null;
     }
 
     @Override
