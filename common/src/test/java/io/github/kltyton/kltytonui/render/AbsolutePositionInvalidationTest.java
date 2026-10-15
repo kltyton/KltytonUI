@@ -42,6 +42,6 @@ class AbsolutePositionInvalidationTest {
         assertNull(absolute.getRenderer().size.get());
         assertSame(parentSize, parent.getRenderer().size.get());
         assertSame(siblingSize, sibling.getRenderer().size.get());
-        assertTrue(absolute.hasDirtyFlag(Drawer.RELAYOUT));
+        assertTrue(absolute.hasDirtyFlag(Drawer.COMMIT_LAYOUT));
     }
 }

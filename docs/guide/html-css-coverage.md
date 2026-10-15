@@ -133,7 +133,7 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 
 **颜色**：hex 全家、rgb/rgba 新旧语法、hsl/hsla、transparent ✅；支持 `color(srgb-linear r g b / a)` 线性光颜色，组件在渲染器 16 倍 SDR 工作范围内保留；`dynamic-range-limit` 支持 `standard`、`constrained`、`no-limit`、数字和百分比，并在 filter shader 中映射工作范围。普通 8-bit framebuffer 在最终显示时仍会钳制 SDR 白点以上的能量。命名色只有 26 个（CSS 有 148 个）；**currentColor 解析为黑**（SVG 内部除外）；hwb/lab/lch/oklch ❌。
 
-**交互**：cursor 常用值 + `url()` 自定义 ✅（move/wait/grab 等回退箭头）；user-select、pointer-events、accent-color、appearance、resize（textarea）✅；outline ❌。
+**交互**：cursor 常用值 + `url()` 自定义 ✅（move/wait/grab 等回退箭头）；user-select、pointer-events、accent-color、appearance、resize（textarea）✅；outline 简写与 outline-width/style/color/offset 已接入，支持实线、虚线和负偏移，其余可见线型按实线绘制。焦点框在子内容之后绘制，不占布局尺寸、不参与命中。
 
 **伪元素 content**：只支持单个引号字符串；attr()/counter()/url()/多段拼接 ❌。
 

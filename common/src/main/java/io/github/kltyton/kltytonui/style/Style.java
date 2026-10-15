@@ -178,6 +178,9 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     public String backfaceVisibility = "visible";
     public String touchAction = "auto";
     public String outline = "none";
+    public String outlineWidth = "unset";
+    public String outlineStyle = "unset";
+    public String outlineColor = "unset";
     public String outlineOffset = "0px";
     public String rotate = "none";
     public String clipPath = "none";
@@ -459,7 +462,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
      */
     private static final Set<String> SHORTHAND_PROPERTIES = Set.of(
             "background", "font", "mask", "flex", "gap", "inset", "margin", "padding", "border",
-            "border-width", "border-color", "animation", "rotate", "overflow", "visibility",
+            "border-width", "border-color", "animation", "rotate", "overflow", "visibility", "outline",
             "inset-inline", "inset-block", "inset-inline-start", "inset-inline-end",
             "inset-block-start", "inset-block-end", "padding-inline", "padding-block",
             "padding-inline-start", "padding-inline-end", "padding-block-start", "padding-block-end",
@@ -551,6 +554,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         }
         if ("border".equals(styleName)) {
             ShorthandParser.applyBorder(this, value);
+            return;
+        }
+        if ("outline".equals(styleName)) {
+            ShorthandParser.applyOutline(this, value);
             return;
         }
         if ("borderWidth".equals(styleName)) {

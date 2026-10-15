@@ -25,6 +25,9 @@ import java.util.function.Predicate;
  * remains compilable without the loader source tree.</p>
  */
 public interface KuiClientService {
+    /** Executes page work on the native client thread. */
+    void executeOnClientThread(Runnable action);
+
     /** Returns the logical window size (scaled GUI size), falling back to a headless default. */
     Size getWindowSize();
 

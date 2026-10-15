@@ -53,6 +53,7 @@ import io.github.kltyton.kltytonui.dom.TextNode;
 import io.github.kltyton.kltytonui.dom.MutationObserverManager;
 import io.github.kltyton.kltytonui.style.Animation;
 import io.github.kltyton.kltytonui.style.Transition;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 
 public class Document implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
 
@@ -76,6 +77,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     /** 文本拖拽候选视为真正拖拽的最小移动距离（与双击按下容差一致）。 */
     private static final double TEXT_DRAG_SLOP_PX = 4.0d;
     private final ElementTree tree = new ElementTree(this);
+    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
     private final RenderQueue render = new RenderQueue(this);
     private final String path;
     public final Map<String, Map<String, CSS.Declaration>> CSSCache = new LinkedHashMap<>();
@@ -540,6 +542,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
 
     private void beginRefreshLifecycle() {
         refreshGeneration++;
+        Window.window.clearDocumentListeners(this);
         // 换代：旧元素实例全部失效，进行中的首次提交分片必须丢弃，按新一代重新开始。
         endInitialCommitSlice();
         lifecycleState = LifecycleState.LOADING;
@@ -565,6 +568,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     public void disposeLifecycle() {
         if (lifecycleState == LifecycleState.DISPOSED) return;
         lifecycleState = LifecycleState.DISPOSED;
+        Window.window.clearDocumentListeners(this);
         KuiServices.script().releaseDocument(this);
         // A document that goes away takes its elements with it, and an element that holds a
         // resource outside the DOM has to hear about it: <iframe> owns an offscreen browser
@@ -757,7 +761,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     }
 
     private void commitMutableInlineStyles() {
-        // CSSOM method writes commit immediately. Only legacy public-field writes need polling,
+        // CSSOM writes update declarations immediately. Only legacy public-field writes need polling,
         // so limit it to elements whose mutable Style object has actually escaped.
         for (Element element : new ArrayList<>(mutableInlineStyleElements)) {
             element.commitPendingInlineStyleMutations();
@@ -981,6 +985,12 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         return path;
     }
 
+    @Override
+    @dev.latvian.mods.rhino.util.HideFromJS
+    public final ScriptHostBindings getScriptBindings() {
+        return scriptBindings;
+    }
+
     public boolean isReloadPersistent() {
         return reloadPersistent;
     }
@@ -1070,7 +1080,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
             case "IMG" -> new io.github.kltyton.kltytonui.element.Img(this);
             case "SVG" -> new io.github.kltyton.kltytonui.element.Svg(this);
             case "AUDIO" -> new io.github.kltyton.kltytonui.element.Audio(this);
-            default -> Element.init(new Element(this, normalized));
+            default -> Element.createForScript(this, normalized);
         };
     }
 

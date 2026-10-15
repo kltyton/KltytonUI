@@ -262,10 +262,16 @@ public class Client {
 
     @SubscribeEvent
     public static void mouseMove(RenderFrameEvent.Pre event) {
+        io.github.kltyton.kltytonui.render.FrameTimingHud.beginFrame();
         io.github.kltyton.kltytonui.init.Window.window.fireAnimationFrame();
         // 渲染帧仅作轮询载具：60Hz 固定节拍由 MouseMoveEngine 调度，
         // 未到期时一次 nanoTime 比较即返回，不会随刷新率放大分发频率。
         MouseMoveEngine.poll(Client::getMousePosition);
+    }
+
+    @SubscribeEvent
+    public static void finishFrameTiming(RenderFrameEvent.Post event) {
+        io.github.kltyton.kltytonui.render.FrameTimingHud.endFrame();
     }
 
     /**
@@ -396,19 +402,12 @@ public class Client {
      */
     @SubscribeEvent
     public static void drawScreen(ScreenEvent.Render.Post event) {
-        io.github.kltyton.kltytonui.render.FrameTimingHud.beginFrame();
-        try {
-            // KuiLinkedScreens submit the UI PIP state during extraction so
-            // frame-local floating items join the same document pass. Other
-            // screens submit the normal document state here.
-            if (!(Minecraft.getInstance().screen instanceof io.github.kltyton.kltytonui.screen.KuiLinkedScreen)) {
-                io.github.kltyton.kltytonui.client.gui.KltytonGuiLayers.submitUi(event.getGuiGraphics());
-            }
-            io.github.kltyton.kltytonui.client.gui.KltytonGuiLayers.submitCursor(event.getGuiGraphics());
-        } finally {
-            io.github.kltyton.kltytonui.render.FrameTimingHud.endFrame();
-            drawFrameTimingHud(event.getGuiGraphics());
+        // Linked screens already submit their PIP state during extraction.
+        if (!(Minecraft.getInstance().screen instanceof io.github.kltyton.kltytonui.screen.KuiLinkedScreen)) {
+            io.github.kltyton.kltytonui.client.gui.KltytonGuiLayers.submitUi(event.getGuiGraphics());
         }
+        io.github.kltyton.kltytonui.client.gui.KltytonGuiLayers.submitCursor(event.getGuiGraphics());
+        drawFrameTimingHud(event.getGuiGraphics());
     }
 
     @SubscribeEvent

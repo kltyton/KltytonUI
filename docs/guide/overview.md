@@ -72,7 +72,7 @@ Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标�
 
 **游戏内 DevTools**：DOM 树、元素拾取、Attributes/Styles/盒模型检视、运行时改样式改结构、存回源文件、meta 编辑、受限控制台。其按键操作默认未绑定，需在控制设置中绑定。见 [DevTools](devtools)。
 
-**外部调试协议**：游戏内开 `remoteDebug` 后，本机 WebSocket（`127.0.0.1:25321`）可以查 DOM、读样式、模拟点击输入。仓库自带 Node 客户端和 MCP 桥，AI 工具可以直连运行中的页面。另有两个截图脚本做视觉回归。见[附加工具](tools)。
+**外部调试协议**：游戏内开 `remoteDebug` 后，本机 WebSocket（默认 `127.0.0.1:25322`，可用 `kltytonui.debug.port` 修改）可以查 DOM、读样式、模拟点击输入。仓库自带 Node 客户端和 MCP 桥，AI 工具可以直连运行中的页面。另有两个截图脚本做视觉回归。见[附加工具](tools)。
 
 **帧耗时 HUD**：`debug.frameTimingHud` 显示 KUI 渲染耗时和批次统计，定位性能问题用。见[二次开发](secondary-development)。
 
@@ -114,4 +114,3 @@ Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标�
 | 外部调试协议、MCP、截图工具 | [tools.md](tools) |
 | WPT 布局对比 | [wpt.md](wpt) |
 | Maven 附件、签名与发布 | [maven-publishing.md](maven-publishing) |
-| AI 开发与调试规则（给 AI 的 skill 文档） | [ai-skill.md](../ai-skill) |

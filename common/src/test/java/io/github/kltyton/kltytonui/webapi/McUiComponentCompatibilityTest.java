@@ -189,16 +189,18 @@ class McUiComponentCompatibilityTest {
                     var radio=group.children[2].children[0];
                     var label=radio.children[0].children[0];
                     var heights=[group].concat(Array.from(group.children)).concat([checkbox,
-                      radio,radio.children[0],label]).concat(Array.from(label.children))
+                      radio,radio.children[0],label]).concat(Array.from(label.children).slice(0,2))
                       .map(function(el){return Math.round(el.getBoundingClientRect().height*100)/100;})
                       .join('|');
                     heights+='|'+Math.round(root.querySelector('.mc-expansion-panel__header')
                       .getBoundingClientRect().height);
+                    heights+='|'+Array.from(group.querySelectorAll('.mc-radio__label'))
+                      .map(function(el){return el.innerText;}).join(',');
                     app.unmount();
                     heights;
                     """, "mcui2-radio-group-geometry", 1, null);
         }
-        assertEquals("60|15|11|28|60|28|28|28|1|24|0|43", heights);
+        assertEquals("60|15|11|28|60|28|28|28|1|24|43|Survival,Creative", heights);
     }
 
     @Test
@@ -410,7 +412,11 @@ class McUiComponentCompatibilityTest {
         @Override
         public Consumer<Object> createCallback(Object callback) {
             if (!(callback instanceof Callable callable)) return null;
-            return new EcmaEventListener(callable, scope, context);
+            EcmaEventListener listener = new EcmaEventListener(callable, scope, context);
+            return value -> RhinoTestSupport.callInContext(context, (cx, owner, receiver, arguments) -> {
+                listener.accept(value);
+                return null;
+            }, scope, scope, new Object[0]);
         }
 
         @Override

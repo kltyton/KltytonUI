@@ -72,7 +72,7 @@ Full API tables and thread/null/refresh rules: [Mod-specific API](kltytonui-api)
 
 **In-game DevTools**: DOM tree, element picking, Attributes/Styles/Box Model inspection, runtime style and structure edits, saving back to source files, meta editing, and a restricted console. Bind **Toggle DevTools** in Controls settings; it is unbound by default. See [DevTools](devtools).
 
-**External debug protocol**: with `remoteDebug` enabled in game, a local WebSocket (`127.0.0.1:25321`) can query the DOM, read styles, and simulate clicks and input. The repo ships a Node client and an MCP bridge, so AI tools can connect directly to a running page. Two screenshot scripts are also included for visual regression. See [Additional Tools](tools).
+**External debug protocol**: with `remoteDebug` enabled in game, a local WebSocket (default `127.0.0.1:25322`, configurable through `kltytonui.debug.port`) can query the DOM, read styles, and simulate clicks and input. The repo ships a Node client and an MCP bridge, so AI tools can connect directly to a running page. Two screenshot scripts are also included for visual regression. See [Additional Tools](tools).
 
 **Frame timing HUD**: `debug.frameTimingHud` shows KUI render timing and batch statistics for locating performance problems. See [Secondary Development](secondary-development).
 
@@ -114,4 +114,3 @@ The repository uses a `common + targets` multi-loader structure: `common/` is lo
 | External debug protocol, MCP, screenshot tools | [tools.md](tools) |
 | WPT layout comparison | [wpt.md](wpt) |
 | Maven artifacts, signing, and publishing | [maven-publishing.md](maven-publishing) |
-| AI development and debugging rules (skill doc for AI) | [ai-skill.md](../ai-skill) |

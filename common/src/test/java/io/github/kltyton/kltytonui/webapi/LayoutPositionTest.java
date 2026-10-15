@@ -1066,11 +1066,12 @@ class LayoutPositionTest {
         double menuWidth = Size.of(menu).width();
         double menuContentWidth = Box.of(menu).innerSize().width();
 
-        assertEquals(200, Math.round(menuWidth));
+        // The content-box minimum excludes the two 2px borders.
+        assertEquals(204, Math.round(menuWidth));
         assertEquals(Math.round(menuContentWidth), Math.round(Size.of(header).width()));
         assertEquals(Math.round(menuContentWidth), Math.round(Size.of(item).width()));
         assertEquals(Math.round(item.getBoundingClientRect().width), Math.round(Size.of(fill).width()));
-        assertEquals(200, Math.round(Size.of(menu).width()), "percentage hover fill must not expand the auto-width menu");
+        assertEquals(204, Math.round(Size.of(menu).width()), "percentage hover fill must not expand the auto-width menu");
     }
 
     @Test

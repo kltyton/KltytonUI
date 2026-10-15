@@ -72,36 +72,27 @@ public final class NodeTree {
     }
 
     public void prepend(Element element) {
-        owner.document.createRelation(Element.init(element), owner, true);
+        owner.insertBefore((Node) element, owner.getFirstChild());
     }
 
     public void append(Element element) {
-        owner.document.createRelation(Element.init(element), owner, false);
+        owner.appendChild((Node) element);
     }
 
     public Element appendChild(Element element) {
-        Element child = Element.init(element);
-        owner.document.createRelation(child, owner, false);
-        return child;
+        return (Element) owner.appendChild((Node) element);
     }
 
     public Element removeChild(Element element) {
-        if (element == null || element.parentNode != owner) return null;
-        owner.document.removeElement(element);
-        return element;
+        return (Element) owner.removeChild((Node) element);
     }
 
     public Element insertBefore(Element newElement, Element referenceElement) {
-        Element child = Element.init(newElement);
-        owner.document.getTree().insertBefore(child, owner, referenceElement);
-        return child;
+        return (Element) owner.insertBefore((Node) newElement, referenceElement);
     }
 
     public Element replaceChild(Element newElement, Element oldElement) {
-        if (oldElement == null || oldElement.parentNode != owner) return null;
-        Element child = Element.init(newElement);
-        owner.document.getTree().replaceChild(owner, child, oldElement);
-        return oldElement;
+        return (Element) owner.replaceChild((Node) newElement, oldElement);
     }
 
     public int getDepth() {

@@ -198,6 +198,7 @@ public class Drawer {
                 paintList.add(new RenderNode.ElementPhaseNode(contextRoot, Base.RenderPhase.BORDER));
                 appendForegroundRenderNodes(contextRoot, paintList);
             }
+            paintList.add(new RenderNode.ElementPhaseNode(contextRoot, Base.RenderPhase.OUTLINE));
             if (contextRoot.mayRenderScrollbar()) {
                 paintList.add(new RenderNode.ScrollbarNode(contextRoot));
             }
@@ -302,6 +303,7 @@ public class Drawer {
         appendForegroundRenderNodes(contextRoot, paintList);
 
         if (needsMask) paintList.add(new RenderNode.MaskPopNode(contextRoot));
+        paintList.add(new RenderNode.ElementPhaseNode(contextRoot, Base.RenderPhase.OUTLINE));
         if (contextRoot.mayRenderScrollbar()) {
             paintList.add(new RenderNode.ScrollbarNode(contextRoot));
         }

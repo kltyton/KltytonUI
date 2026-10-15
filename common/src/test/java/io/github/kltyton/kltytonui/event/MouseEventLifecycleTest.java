@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,7 +49,12 @@ class MouseEventLifecycleTest {
                 downCount.incrementAndGet();
                 event.preventDefault();
             });
-            option.addEventListener("click", event -> clickCount.incrementAndGet());
+            option.addEventListener("click", event -> {
+                assertNull(document.getPressedElement());
+                assertFalse(option.isActive);
+                assertFalse(document.body.isActive);
+                clickCount.incrementAndGet();
+            });
             search.focus();
 
             Position optionPoint = new Position(40, 60);

@@ -116,7 +116,7 @@ public class Element extends Node {
     private static final HashMap<String, CSS.Declaration> EMPTY_DECLARATIONS = new HashMap<>();
     private Element beforePseudoElement = null;
     private Element afterPseudoElement = null;
-    private List<Node> renderChildNodesCache = null;
+    private volatile List<Node> renderChildNodesCache = null;
     private TextNode legacyRenderTextNode = null;
     private HashMap<String, CSS.Declaration> beforePseudoStyles = null;
     private HashMap<String, CSS.Declaration> afterPseudoStyles = null;
@@ -222,6 +222,7 @@ public class Element extends Node {
     private Style inlineStyleSnapshot = inlineStyle.clone();
     private List<InlineStyleDeclaration.Entry> inlineDeclarations = new ArrayList<>();
     private boolean inlineStyleInitialized = false;
+    private boolean inlineStyleSnapshotPending = false;
     private boolean mutableInlineStyleExposed = false;
     private boolean syncingInlineStyle = false;
     private boolean updatingInlineStyle = false;
@@ -247,7 +248,7 @@ public class Element extends Node {
     }
 
     public void setInlineStyleProperty(String name, String value, String priority) {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         String property = InlineStyleDeclaration.normalizeProperty(name);
         if (property.isBlank()) return;
         String normalizedValue = value == null ? "" : value.trim();
@@ -255,6 +256,7 @@ public class Element extends Node {
         if (!normalizedPriority.isEmpty() && !"important".equals(normalizedPriority)) return;
         String declarationValue = normalizedValue
                 + ("important".equals(normalizedPriority) ? " !important" : "");
+        if ("transform".equals(property)) ensureInlineStyleInitialized();
         // Vue rewrites scoped variables and layout bindings after each update.
         // Identical declarations retain their order and style caches.
         // Authored duplicate declarations still use the replacement path below.
@@ -285,7 +287,7 @@ public class Element extends Node {
     }
 
     public String removeInlineStyleProperty(String name) {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         String property = InlineStyleDeclaration.normalizeProperty(name);
         String previous = InlineStyleDeclaration.lastValue(inlineDeclarations, property);
         if (previous != null) {
@@ -296,32 +298,34 @@ public class Element extends Node {
     }
 
     public String getInlineStylePropertyValue(String name) {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         String property = InlineStyleDeclaration.normalizeProperty(name);
         String value = InlineStyleDeclaration.lastValue(inlineDeclarations, property);
         if (value != null) return InlineStyleDeclaration.valueWithoutPriority(value);
+        if (property.startsWith("--")) return "";
+        ensureInlineStyleInitialized();
         String expanded = inlineStyle.get(property);
         return expanded == null || "unset".equalsIgnoreCase(expanded) ? "" : expanded;
     }
 
     public String getInlineStylePropertyPriority(String name) {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         return InlineStyleDeclaration.priorityOf(
                 InlineStyleDeclaration.lastValue(inlineDeclarations, InlineStyleDeclaration.normalizeProperty(name)));
     }
 
     public String getInlineStyleCssText() {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         return InlineStyleDeclaration.serialize(inlineDeclarations);
     }
 
     public void setInlineStyleCssText(String value) {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         setAttribute("style", value == null ? "" : value);
     }
 
     public String[] getInlineStylePropertyNames() {
-        syncLegacyInlineStyleMutations();
+        syncLegacyInlineStyleMutations(false);
         String[] names = new String[inlineDeclarations.size()];
         for (int index = 0; index < names.length; index++) {
             names[index] = inlineDeclarations.get(index).property();
@@ -370,7 +374,7 @@ public class Element extends Node {
 
     public String getAttribute(String name) {
         if (name == null) return null;
-        if ("style".equals(name)) syncLegacyInlineStyleMutations();
+        if ("style".equals(name)) syncLegacyInlineStyleMutations(false);
         // style 属性以 attributes 中的原始值为准，避免读取时覆盖掉运行时写入的 inline style。
         if ("id".equals(name)) {
             String attrId = attributes.get("id");
@@ -611,18 +615,25 @@ public class Element extends Node {
             inlineStyleSnapshot = inlineStyle.clone();
             inlineStyleAttributeSnapshot = rawAttributeValue;
             inlineStyleInitialized = true;
+            inlineStyleSnapshotPending = false;
         } finally {
             updatingInlineStyle = false;
         }
     }
 
     private void ensureInlineStyleInitialized() {
-        if (!inlineStyleInitialized) updateInlineStyle();
+        if (!inlineStyleInitialized || inlineStyleSnapshotPending) updateInlineStyle();
     }
 
     private void syncLegacyInlineStyleMutations() {
+        syncLegacyInlineStyleMutations(true);
+    }
+
+    private void syncLegacyInlineStyleMutations(boolean requireSnapshot) {
         if (syncingInlineStyle || updatingInlineStyle) return;
-        ensureInlineStyleInitialized();
+        if (!inlineStyleInitialized || requireSnapshot || mutableInlineStyleExposed) {
+            ensureInlineStyleInitialized();
+        }
         String attributeValue = attributes.get("style");
         if (!Objects.equals(attributeValue, inlineStyleAttributeSnapshot)) {
             String oldValue = inlineStyleAttributeSnapshot;
@@ -651,7 +662,9 @@ public class Element extends Node {
         syncingInlineStyle = true;
         try {
             attributes.put("style", serialized);
-            updateInlineStyle();
+            inlineStyleAttributeSnapshot = serialized;
+            inlineStyleSnapshotPending = true;
+            if (mutableInlineStyleExposed) updateInlineStyle();
             if (!Objects.equals(oldValue, serialized)) invalidateStyle();
             if (document != null && !Objects.equals(oldValue, serialized)) {
                 document.queueMutation(Document.MutationRecord.attributes(this, "style", oldValue));
@@ -1195,6 +1208,12 @@ public class Element extends Node {
         textSelection.drawInnerText(poseStack, rectRenderer);
     }
 
+    /** Draws the element's outline after its descendants and outside its content clip. */
+    @HideFromJS
+    public void drawOutlineOnly(PoseStack poseStack) {
+        Rect.of(this).drawOutline(poseStack);
+    }
+
     /** Draw this element's native scrollbars after its content clip has been popped. */
     @HideFromJS
     public void drawScrollbar(PoseStack poseStack, Rect rectRenderer) {
@@ -1295,6 +1314,15 @@ public class Element extends Node {
         REGISTRY.put(tagName.toUpperCase(Locale.ROOT), creator);
     }
 
+    /** Creates a detached script node without constructing and replacing a temporary base node. */
+    static Element createForScript(Document document, String tagName) {
+        BiFunction<Document, String, ? extends Element> creator = REGISTRY.get(tagName);
+        Element element = creator == null ? new Element(document, tagName) : creator.apply(document, tagName);
+        if (creator != null) element.updateInlineStyle();
+        element.runInitFromDomOnce(element);
+        return element;
+    }
+
     private void requestRelationalSelectorRecalc() {
         if (document == null || !document.getSelectorIndex().hasRelationalSelectors()) return;
         for (Element ancestor = parentElement; ancestor != null; ancestor = ancestor.parentElement) {
@@ -1330,6 +1358,11 @@ public class Element extends Node {
             element.parentNode = origin.parentNode;
             element.parentElement = origin.parentElement;
             element.value = origin.value;
+            element.valueDirty = origin.valueDirty;
+            element.checkedState = origin.checkedState;
+            element.checkedDirty = origin.checkedDirty;
+            element.selectedState = origin.selectedState;
+            element.selectedDirty = origin.selectedDirty;
             element.classNames = origin.classNames;
             origin.childNodes.forEach(node -> {
                 node.parentNode = element;
@@ -1465,34 +1498,37 @@ public class Element extends Node {
         Element after = getGeneratedPseudoElement(Selector.PseudoElement.AFTER);
         if (childNodes.isEmpty() && before == null && after == null) {
             renderChildNodesCache = null;
-            return childNodes;
+            return List.of();
         }
         boolean includeLegacyText = childNodes.isEmpty() && innerText != null && !innerText.isEmpty();
         TextNode legacyText = includeLegacyText ? getLegacyRenderTextNode() : null;
-        if (matchesRenderChildNodesCache(before, legacyText, after)) {
-            return renderChildNodesCache;
+        List<Node> cached = renderChildNodesCache;
+        if (matchesRenderChildNodesCache(cached, before, legacyText, after)) {
+            return cached;
         }
         ArrayList<Node> result = new ArrayList<>(childNodes.size() + (includeLegacyText ? 3 : 2));
         if (before != null) result.add(before);
         if (legacyText != null) result.add(legacyText);
         result.addAll(childNodes);
         if (after != null) result.add(after);
-        renderChildNodesCache = Collections.unmodifiableList(result);
-        return renderChildNodesCache;
+        List<Node> published = Collections.unmodifiableList(result);
+        renderChildNodesCache = published;
+        return published;
     }
 
-    private boolean matchesRenderChildNodesCache(Element before, TextNode legacyText, Element after) {
-        if (renderChildNodesCache == null) return false;
+    private boolean matchesRenderChildNodesCache(List<Node> cached, Element before, TextNode legacyText, Element after) {
+        if (cached == null) return false;
         int expectedSize = childNodes.size() + (before == null ? 0 : 1)
                 + (legacyText == null ? 0 : 1) + (after == null ? 0 : 1);
-        if (renderChildNodesCache.size() != expectedSize) return false;
-        int index = 0;
-        if (before != null && renderChildNodesCache.get(index++) != before) return false;
-        if (legacyText != null && renderChildNodesCache.get(index++) != legacyText) return false;
+        if (cached.size() != expectedSize) return false;
+        var iterator = cached.iterator();
+        if (before != null && iterator.next() != before) return false;
+        if (legacyText != null && iterator.next() != legacyText) return false;
         for (Node child : childNodes) {
-            if (renderChildNodesCache.get(index++) != child) return false;
+            if (!iterator.hasNext() || iterator.next() != child) return false;
         }
-        return after == null || renderChildNodesCache.get(index) == after;
+        if (after != null && (!iterator.hasNext() || iterator.next() != after)) return false;
+        return !iterator.hasNext();
     }
 
     private TextNode getLegacyRenderTextNode() {
@@ -1890,7 +1926,7 @@ public class Element extends Node {
     @Override
     public Element cloneNode(boolean deep) {
         syncLegacyInlineStyleMutations();
-        Element cloned = Element.init(new Element(document, tagName));
+        Element cloned = new Element(document, tagName);
         cloned.innerText = innerText;
         cloned.id = id;
         cloned.value = value;
@@ -1908,7 +1944,7 @@ public class Element extends Node {
                 if (copy != null) cloned.appendChild(copy);
             }
         }
-        return cloned;
+        return Element.init(cloned);
     }
 
     public String getInnerHTML() {

@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.webapi;
 
 import dev.latvian.mods.rhino.Context;
+import dev.latvian.mods.rhino.Callable;
 import dev.latvian.mods.rhino.Scriptable;
 import io.github.kltyton.kltytonui.script.StandaloneRhinoRuntime;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
@@ -20,6 +21,18 @@ import java.lang.reflect.Modifier;
  */
 public final class RhinoTestSupport {
     private RhinoTestSupport() {
+    }
+
+    static Object callInContext(Context context, Callable callback, Scriptable scope,
+                                Scriptable receiver, Object[] arguments) {
+        try {
+            return Context.class.getMethod("callSync", Callable.class, Scriptable.class,
+                    Scriptable.class, Object[].class).invoke(context, callback, scope, receiver, arguments);
+        } catch (NoSuchMethodException legacyContext) {
+            return callback.call(context, scope, receiver, arguments);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Unable to invoke Rhino callback", exception);
+        }
     }
 
     public static Context enterContext() {

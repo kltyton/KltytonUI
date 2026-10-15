@@ -17,6 +17,7 @@ class TransformHitTestTest {
     @Test
     void centeredTransformedModalHitsItsVisualButtonPosition() {
         Document document = TestDocumentFactory.createDocument();
+        document.applyViewport(false);
         document.body.setAttribute("style", "width:800px;height:600px;");
 
         Element overlay = document.createElement("div");

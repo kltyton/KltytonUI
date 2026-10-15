@@ -8,6 +8,7 @@ import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.loader.Loader;
 import io.github.kltyton.kltytonui.parser.JS;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 import io.github.kltyton.kltytonui.script.ecmascript.EcmaReflectGet;
 import io.github.kltyton.kltytonui.script.host.RhinoHostObject;
 import io.github.kltyton.kltytonui.spi.KuiServices;
@@ -21,7 +22,6 @@ import dev.latvian.mods.rhino.ScriptableObject;
 import dev.latvian.mods.rhino.SharedContextData;
 
 import java.util.Map;
-import java.util.IdentityHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -119,6 +119,11 @@ public final class StandaloneRhinoRuntime {
     }
 
     public static void reload() {
+        for (RuntimeState runtime : RUNTIMES.values()) {
+            synchronized (runtime) {
+                runtime.hostObjects.clear();
+            }
+        }
         RUNTIMES.clear();
         synchronized (GLOBAL_SCRIPT_LOCK) {
             cachedGlobalCode = null;
@@ -127,7 +132,13 @@ public final class StandaloneRhinoRuntime {
     }
 
     public static void release(Document document) {
-        if (document != null) RUNTIMES.remove(document.getUuid().toString());
+        if (document == null) return;
+        RuntimeState runtime = RUNTIMES.remove(document.getUuid().toString());
+        if (runtime != null) {
+            synchronized (runtime) {
+                runtime.hostObjects.clear();
+            }
+        }
     }
 
     public static RhinoHostObject wrapHostObject(
@@ -136,27 +147,21 @@ public final class StandaloneRhinoRuntime {
             Scriptable scope
     ) {
         if (host == null || delegate == null) return null;
-        Document document = host instanceof Document hostDocument
-                ? hostDocument
-                : Document.getContextDocument();
+        Document document = Document.getContextDocument();
+        if (document == null && host instanceof Document hostDocument) document = hostDocument;
         if (document == null || document.isDisposed()) {
             return new RhinoHostObject(host, delegate, scope);
         }
         RuntimeState runtime = runtimeFor(document);
         synchronized (runtime) {
-            RhinoHostObject cached = runtime.hostObjects.get(host);
-            if (cached != null) return cached;
-            RhinoHostObject wrapped = new RhinoHostObject(host, delegate, scope);
-            runtime.hostObjects.put(host, wrapped);
-            return wrapped;
+            return runtime.hostObjects.wrap(host, delegate, scope);
         }
     }
 
     public static Object wrapHostValue(Object value) {
         if (!(value instanceof KuiScriptHost)) return value;
-        Document document = value instanceof Document hostDocument
-                ? hostDocument
-                : Document.getContextDocument();
+        Document document = Document.getContextDocument();
+        if (document == null && value instanceof Document hostDocument) document = hostDocument;
         if (document == null || document.isDisposed()) return value;
         RuntimeState runtime = runtimeFor(document);
         Context context = enterContext();
@@ -190,10 +195,11 @@ public final class StandaloneRhinoRuntime {
         Document document = Document.getContextDocument();
         if (document == null || document.isDisposed()) return null;
         RuntimeState runtime = runtimeFor(document);
+        long generation = document.getRefreshGeneration();
         return value -> {
-            if (document.isDisposed() || runtime.generation != document.getRefreshGeneration()) return;
+            if (document.isDisposed() || generation != document.getRefreshGeneration()) return;
             Context context = enterContext();
-            try {
+            try (Document.ContextScope ignored = Document.withContext(document)) {
                 synchronized (runtime) {
                     ensureScope(context, runtime);
                     Object wrapped = wrapHostValue(context, value, runtime.scope);
@@ -278,6 +284,6 @@ public final class StandaloneRhinoRuntime {
     private static final class RuntimeState {
         private long generation = -1L;
         private ScriptableObject scope;
-        private final IdentityHashMap<KuiScriptHost, RhinoHostObject> hostObjects = new IdentityHashMap<>();
+        private final ScriptHostBindings.RuntimeCache hostObjects = new ScriptHostBindings.RuntimeCache();
     }
 }

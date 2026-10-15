@@ -911,7 +911,8 @@ function __auiDecorateNode(el) {
     __auiInstallValueBridge(el, 'previousSibling', () => __auiDecorateNode(el.getPreviousSibling ? el.getPreviousSibling() : null));
     __auiInstallValueBridge(el, 'parentNode', () => __auiDecorateNode(el.getParentNode ? el.getParentNode() : null));
     __auiInstallValueBridge(el, 'ownerDocument', () => el.getOwnerDocument ? el.getOwnerDocument() : null);
-    __auiInstallValueBridge(el, 'isConnected', () => el.isConnected ? !!el.isConnected() : false);
+    let nativeIsConnected = el.isConnected;
+    __auiInstallValueBridge(el, 'isConnected', () => nativeIsConnected ? !!nativeIsConnected.call(el) : false);
     __auiInstallValueBridge(el, 'data', () => el.getNodeValue ? el.getNodeValue() : null, (v) => {
       if (typeof el.setTextContent === 'function') el.setTextContent(v == null ? '' : String(v));
     });
@@ -938,6 +939,7 @@ function __auiDecorateNode(el) {
       __auiInstallValueBridge(el, 'innerHTML', () => el.getInnerHTML(), (v) => el.setInnerHTML(v == null ? '' : String(v)));
       __auiInstallValueBridge(el, 'outerHTML', () => el.getOuterHTML(), (v) => el.setOuterHTML(v == null ? '' : String(v)));
       __auiInstallValueBridge(el, 'className', () => el.getClassName(), (v) => el.setClassName(v == null ? '' : String(v)));
+      __auiInstallValueBridge(el, 'id', () => el.getAttribute('id') || '', (v) => el.setAttribute('id', v == null ? '' : String(v)));
       __auiInstallValueBridge(el, 'classList', () => __auiDecorateTokenList(el.getClassList()));
       __auiInstallValueBridge(el, 'dataset', () => __auiDecorateDataset(el.getDataset()));
       __auiInstallValueBridge(el, 'style', () => __auiDecorateStyle(el), (v) => {
@@ -1086,7 +1088,7 @@ function __auiDecorateNode(el) {
       __auiInstallValueBridge(el, 'lastElementChild', () => __auiDecorateNode(el.getLastElementChild()));
       __auiInstallValueBridge(el, 'nextElementSibling', () => __auiDecorateNode(el.getNextElementSibling()));
       __auiInstallValueBridge(el, 'previousElementSibling', () => __auiDecorateNode(el.getPreviousElementSibling()));
-      __auiInstallValueBridge(el, 'parentElement', () => __auiDecorateNode(el.getParentNode()));
+      __auiInstallValueBridge(el, 'parentElement', () => __auiDecorateNode(el.getParentElement()));
       let qs = el.querySelector;
       el.querySelector = function(sel) { return __auiDecorateNode(qs.call(el, sel)); };
       let qsa = el.querySelectorAll;

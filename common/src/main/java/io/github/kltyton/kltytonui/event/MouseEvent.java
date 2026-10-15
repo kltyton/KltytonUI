@@ -387,8 +387,9 @@ public class MouseEvent extends Event implements Cloneable {
         if (event.type.equals("mouseup")) {
             AtomicBoolean followupConsumed = new AtomicBoolean(false);
             Event.runWithEventTrust(event, () -> {
-                followupConsumed.set(dispatchMouseUpFollowupEvents(document, event, target, activeElement));
+                // Click listeners may measure or detach the pressed node.
                 document.setPressedElement(null);
+                followupConsumed.set(dispatchMouseUpFollowupEvents(document, event, target, activeElement));
             });
             consumed |= followupConsumed.get();
         }
@@ -583,6 +584,7 @@ public class MouseEvent extends Event implements Cloneable {
                     clipStack.pop();
                 }
             } else if (node instanceof RenderNode.ElementPhaseNode phaseNode) {
+                if (phaseNode.phase() == Base.RenderPhase.OUTLINE) continue;
                 Element element = phaseNode.target();
 
                 if (!Interaction.isDisplayed(element) || !element.isVisible || !element.isPointerEnabled) continue;

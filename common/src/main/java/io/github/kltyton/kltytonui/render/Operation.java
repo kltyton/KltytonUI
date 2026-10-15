@@ -41,7 +41,7 @@ public class Operation {
     }
 
     public static boolean onMouseDown(int button) {
-        return onMouseDown(button, getMousePositionDirectly());
+        return onMouseDown(button, mouseEventPosition());
     }
 
     public static boolean onMouseDown(int button, Position mousePosition) {
@@ -62,7 +62,7 @@ public class Operation {
     }
 
     public static boolean onMouseUp(int button) {
-        return onMouseUp(button, getMousePositionDirectly());
+        return onMouseUp(button, mouseEventPosition());
     }
 
     public static boolean onMouseUp(int button, Position mousePosition) {
@@ -118,7 +118,7 @@ public class Operation {
     }
 
     public static boolean scroll(double delta) {
-        MouseEvent mouseEvent = new MouseEvent("wheel", getMousePositionDirectly());
+        MouseEvent mouseEvent = new MouseEvent("wheel", mouseEventPosition());
         mouseEvent.deltaY = -delta * 50;
         mouseEvent.scrollDelta = mouseEvent.deltaY;
         mouseEvent.cancelable = true;
@@ -538,15 +538,14 @@ public class Operation {
         return "";
     }
 
-    /**
-     * FIXME:
-     * 如果在某些情况（如窗口拖动等）鼠标位置缓存为空或者是读到旧的缓存值时请参考{@link #getMousePositionDirectly()}
-     * 未来建议重构，统一输入源，或在输入更新链中保证鼠标坐标始终同步。
-     *
-     * @see #getMousePositionDirectly()
-     */
+    /** Returns the position of the most recently dispatched mouse-move event. */
     public static Position getMousePosition() {
         return cachedMousePosition;
+    }
+
+    private static Position mouseEventPosition() {
+        return KuiServices.client().getWindowHandle() == 0
+                ? cachedMousePosition : KuiServices.client().getMousePosition();
     }
 
     public static Position getMousePositionDirectly() {

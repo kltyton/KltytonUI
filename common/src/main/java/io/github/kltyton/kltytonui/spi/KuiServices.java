@@ -162,6 +162,11 @@ public final class KuiServices {
     private static final class Defaults {
         static final KuiClientService CLIENT = new KuiClientService() {
             @Override
+            public void executeOnClientThread(Runnable action) {
+                action.run();
+            }
+
+            @Override
             public Size getWindowSize() {
                 return new Size(1920, 1080);
             }

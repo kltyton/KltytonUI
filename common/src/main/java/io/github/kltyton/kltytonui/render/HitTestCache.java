@@ -93,6 +93,7 @@ public final class HitTestCache {
                 continue;
             }
             if (!(node instanceof RenderNode.ElementPhaseNode phaseNode)) continue;
+            if (phaseNode.phase() == Base.RenderPhase.OUTLINE) continue;
             Element element = phaseNode.target();
             if (element == null || element.document != owner) continue;
             if (!seenElements.add(element)) continue;
@@ -147,6 +148,7 @@ public final class HitTestCache {
                 continue;
             }
             if (!(node instanceof RenderNode.ElementPhaseNode phaseNode)) continue;
+            if (phaseNode.phase() == Base.RenderPhase.OUTLINE) continue;
             Element element = phaseNode.target();
             if (element == null || element.document != owner) continue;
             if (!isInAnyRoot(element, roots)) continue;
@@ -353,7 +355,8 @@ public final class HitTestCache {
         if (element == null || paintOrder == null) return -1;
         for (int i = paintOrder.size() - 1; i >= 0; i--) {
             RenderNode node = paintOrder.get(i);
-            if (node instanceof RenderNode.ElementPhaseNode phaseNode && phaseNode.target() == element) {
+            if (node instanceof RenderNode.ElementPhaseNode phaseNode && phaseNode.target() == element
+                    && phaseNode.phase() != Base.RenderPhase.OUTLINE) {
                 return i;
             }
         }

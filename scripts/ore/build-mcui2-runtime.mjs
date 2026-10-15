@@ -65,7 +65,10 @@ const adaptVisualGallery = {
     const end = source.indexOf('        />', start);
     if (start < 0 || end < 0) throw new Error('SkinViewer gallery section changed upstream');
     const withoutViewer = source.slice(0, start) + source.slice(end + '        />'.length);
+    const radioOptions = ':options="options.slice(0, 2)"';
+    if (!withoutViewer.includes(radioOptions)) throw new Error('RadioGroup gallery options changed upstream');
     const adapted = withoutViewer
+      .replace(radioOptions, ':options="options.slice(0, 2).map(item => ({ value: item.value, label: item.title, disabled: item.disabled }))"')
       .replace("import { usePop } from '../../../../src'", '')
       .replace('const pop = usePop()', 'const pop = McUIVue.usePop()')
       .replace(/const skinData =\s*\r?\n\s*'[^']+'\s*\r?\n/, '')

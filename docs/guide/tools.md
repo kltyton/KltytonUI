@@ -14,15 +14,16 @@ tools/
 
 ## 打开外部调试服务
 
-工具链路都连游戏内的调试服务，地址固定 `ws://127.0.0.1:25321/kltytonui`。开启方式（开发环境默认开）：
+工具链路连接游戏内的调试服务，默认地址为 `ws://127.0.0.1:25322/kltytonui`。端口可用 `-Dkltytonui.debug.port=端口号` 修改；连接时以游戏目录中 `kltytonui/debug.json` 的 endpoint 为准。开启方式：
 
 ```toml
-# config/kltytonui-client.toml
+# Forge: config/kltytonui-client.toml
+# NeoForge: config/kltytonui_config.toml
 [debug]
 remoteDebug = true
 ```
 
-服务启动后会在游戏目录写 `run/kltytonui/debug.json`（endpoint + token + pid）。token 每次启动随机生成，可用 `-Dkltytonui.debug.token=...` 固定，`-Dkltytonui.debug.enabled=false` 关闭服务。
+服务启动后会在游戏目录写 `kltytonui/debug.json`（endpoint + token + pid）。token 每次启动随机生成，可用 `-Dkltytonui.debug.token=...` 固定，`-Dkltytonui.debug.enabled=false` 关闭服务。
 
 **debug.json 是访问凭据**——拿到它就能操作当前客户端的真实 UI。别提交、别分享。连不上时先查这个文件存不存在。
 

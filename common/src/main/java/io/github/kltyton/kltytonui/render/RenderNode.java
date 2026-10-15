@@ -239,6 +239,7 @@ public interface RenderNode {
             if (shouldSkip(target)) return;
             AABB currentClip = Mask.getCurrentClip();
             Rect rect = Rect.of(target);
+            if (phase == Base.RenderPhase.OUTLINE && !rect.box.outline.isVisible()) return;
             if (isFullyCulled(rect, currentClip)) return;
 
             Base.applyTransform(poseStack, target);
@@ -261,7 +262,9 @@ public interface RenderNode {
                         currentClip
                 );
             }
-            if (phase == Base.RenderPhase.BODY && !WorldWindowRenderContext.shouldRenderContent()) {
+            if (phase == Base.RenderPhase.OUTLINE) {
+                target.drawOutlineOnly(poseStack);
+            } else if (phase == Base.RenderPhase.BODY && !WorldWindowRenderContext.shouldRenderContent()) {
                 target.drawBackgroundOnly(poseStack);
             } else {
                 target.drawPhase(poseStack, phase);

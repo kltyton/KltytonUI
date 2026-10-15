@@ -143,11 +143,8 @@ public class Rect {
             maxExtendX = Math.max(maxExtendX, shadow.x() + extent);
             maxExtendY = Math.max(maxExtendY, shadow.y() + extent);
         }
-        Style style = element.getComputedStyle();
-        OutlineSpec outline = OutlineSpec.parse(style, elementSize.width());
-        if (outline != null && outline.width > 0) {
-            double extent = Math.max(0, outline.width
-                    + Size.resolveLength(style.outlineOffset, elementSize.width(), 0));
+        if (box.outline.isVisible()) {
+            double extent = Math.max(0, box.outline.width() + box.outline.offset());
             minExtendX = Math.min(minExtendX, -extent);
             minExtendY = Math.min(minExtendY, -extent);
             maxExtendX = Math.max(maxExtendX, extent);
@@ -177,7 +174,6 @@ public class Rect {
         float rightW = (float) rightBorder.size();
 
         if (topW <= 0 && bottomW <= 0 && leftW <= 0 && rightW <= 0) {
-            drawOutline(poseStack);
             return;
         }
 
@@ -219,33 +215,32 @@ public class Rect {
             String path = Loader.resolve(documentPath, box.borderImage.source);
             Base.commitDraws();
             ImageDrawer.drawNineSlice(poseStack, path, (int) p.x, (int) p.y, (int) s.width(), (int) s.height(), box.borderImage);
-            drawOutline(poseStack);
             return;
         }
-        drawOutline(poseStack);
     }
 
-    private void drawOutline(PoseStack poseStack) {
-        Style style = element.getComputedStyle();
-        OutlineSpec outline = OutlineSpec.parse(style, elementSize.width());
-        if (outline == null || outline.width <= 0 || (outline.color >>> 24) == 0) return;
+    public void drawOutline(PoseStack poseStack) {
+        Box.Outline outline = box.outline;
+        if (!outline.isVisible()) return;
+        int color = outline.usesTextColor() ? Color.parse(element.getComputedStyle().color) : outline.color();
+        if ((color >>> 24) == 0) return;
 
-        double offset = Size.resolveLength(style.outlineOffset, elementSize.width(), 0);
-        double expansion = offset + outline.width;
+        double expansion = outline.offset() + outline.width();
         float x = (float) (position.x + box.getMarginLeft() - expansion);
         float y = (float) (position.y + box.getMarginTop() - expansion);
         float width = (float) Math.max(0, elementSize.width() + expansion * 2);
         float height = (float) Math.max(0, elementSize.height() + expansion * 2);
-        float stroke = (float) outline.width;
+        float stroke = (float) outline.width();
         if (width <= 0 || height <= 0) return;
 
-        if (outline.dashed) {
-            drawDashedOutline(poseStack, x, y, width, height, stroke, outline.color);
+        Graph.beginBatch();
+        if (outline.dashed()) {
+            drawDashedOutline(poseStack, x, y, width, height, stroke, color);
             return;
         }
         float[] radii = box.getCalculatedRadii(width, height, (float) -expansion);
         float[] borders = new float[]{stroke, stroke, stroke, stroke};
-        int[] colors = new int[]{outline.color, outline.color, outline.color, outline.color};
+        int[] colors = new int[]{color, color, color, color};
         Graph.drawComplexRoundedBorder(PoseMatrices.of(poseStack), x, y, width, height, radii, borders, colors);
     }
 
@@ -265,32 +260,6 @@ public class Rect {
             Graph.drawFillRect(matrix, x, y + cursor, x + stroke, y + cursor + length, color);
             Graph.drawFillRect(matrix, x + width - stroke, y + cursor,
                     x + width, y + cursor + length, color);
-        }
-    }
-
-    private record OutlineSpec(double width, boolean dashed, int color) {
-        private static OutlineSpec parse(Style style, double percentBasis) {
-            if (style == null || style.outline == null) return null;
-            String raw = style.outline.trim();
-            if (raw.isEmpty() || "none".equalsIgnoreCase(raw)) return null;
-            double width = 3;
-            boolean dashed = false;
-            StringBuilder color = new StringBuilder();
-            for (String token : raw.split("\\s+")) {
-                Double length = Size.tryResolveLength(token, percentBasis);
-                if (length != null) {
-                    width = Math.max(0, length);
-                } else if ("dashed".equalsIgnoreCase(token)) {
-                    dashed = true;
-                } else if (!"solid".equalsIgnoreCase(token) && !"dotted".equalsIgnoreCase(token)
-                        && !"double".equalsIgnoreCase(token)) {
-                    if (!color.isEmpty()) color.append(' ');
-                    color.append(token);
-                }
-            }
-            String colorValue = color.isEmpty() ? style.color : color.toString();
-            if ("currentcolor".equalsIgnoreCase(colorValue)) colorValue = style.color;
-            return new OutlineSpec(width, dashed, Color.parse(colorValue));
         }
     }
 

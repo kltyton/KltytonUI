@@ -160,7 +160,7 @@ Either kind of reload rebuilds the page, and every old element reference in your
 
 The mod ships with a complete set of AI-assisted development support. Set it up once, and most of the work of writing pages can be handed to AI afterwards.
 
-**Step 1: provide the development documentation.** The [page development and debugging guide](ai-skill) and [documentation index](guide/overview) cover resource paths, page metas, the four hosts, containers, and debugging protocols. Provide the documents and resources relevant to the current page to your external development tool.
+**Step 1: provide the development documentation.** The [documentation index](guide/overview) covers resource paths, page metas, the four hosts, containers, and debugging protocols. Provide the documents and resources relevant to the current page to your external development tool.
 
 **Step 2: turn on two switches** (`config/kltytonui-client.toml`):
 

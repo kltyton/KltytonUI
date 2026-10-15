@@ -22,8 +22,8 @@ targetBuilds.each { targetName, targetBuild ->
     tasks.register(targetBuild.task, Exec) {
         group = 'build'
         description = "Builds ${targetName} in its independent Gradle project."
-        workingDir rootDir
-        commandLine 'cmd', '/c', "${rootDir.absolutePath}\\gradlew.bat", '-p', targetBuild.directory.replace('/', '\\'), 'build', '--console', 'plain', '--no-daemon'
+        workingDir file(targetBuild.directory)
+        commandLine 'cmd', '/c', 'gradlew.bat', 'build', '--console', 'plain', '--no-daemon'
     }
 }
 

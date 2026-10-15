@@ -2,7 +2,7 @@ package io.github.kltyton.kltytonui.task;
 
 import io.github.kltyton.kltytonui.KltytonUI;
 
-import java.lang.reflect.Method;
+import io.github.kltyton.kltytonui.spi.KuiServices;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.function.Consumer;
@@ -56,17 +56,6 @@ public class ClientScheduler {
 
     private static void runOnClientThread(Runnable action) {
         if (action == null) return;
-        try {
-            Class<?> minecraftClass = Class.forName("net.minecraft.client.Minecraft");
-            Method getInstance = minecraftClass.getMethod("getInstance");
-            Object minecraft = getInstance.invoke(null);
-            if (minecraft != null) {
-                Method execute = minecraftClass.getMethod("execute", Runnable.class);
-                execute.invoke(minecraft, action);
-                return;
-            }
-        } catch (Throwable ignored) {
-        }
-        action.run();
+        KuiServices.client().executeOnClientThread(action);
     }
 }

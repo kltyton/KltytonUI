@@ -1,5 +1,7 @@
 package io.github.kltyton.kltytonui.world;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+
 import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.neoforge.RenderService;
 import net.minecraft.client.Minecraft;
@@ -31,10 +33,24 @@ public final class WorldWindowRenderer {
         // 26.1 和 1.21.1 一样：getPoseStack() 只有局部变换，视图矩阵单独给。
         Matrix4f viewMatrix = new Matrix4f(event.getModelViewMatrix());
         float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
-        RenderService.INSTANCE.setProjectionMatrix(new Matrix4f(projectionMatrix));
-
-        for (WorldWindow window : WorldWindow.windows) {
-            window.render(event.getPoseStack(), viewMatrix, projectionMatrix, partialTick);
+        Matrix4f previousStoredProjection = RenderService.INSTANCE.getProjectionMatrix();
+        var previousProjection = RenderSystem.getProjectionMatrixBuffer();
+        var previousProjectionType = RenderSystem.getProjectionType();
+        var modelView = RenderSystem.getModelViewStack();
+        modelView.pushMatrix();
+        try {
+            modelView.set(viewMatrix);
+            RenderService.INSTANCE.setProjectionMatrix(new Matrix4f(projectionMatrix));
+            for (WorldWindow window : WorldWindow.windows) {
+                window.render(event.getPoseStack(), viewMatrix, projectionMatrix, partialTick);
+            }
+        } finally {
+            try {
+                RenderService.INSTANCE.setProjectionMatrix(previousStoredProjection);
+            } finally {
+                modelView.popMatrix();
+                RenderSystem.setProjectionMatrix(previousProjection, previousProjectionType);
+            }
         }
     }
 }

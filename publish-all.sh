@@ -38,7 +38,7 @@ fi
 export PUBLISH_CHANGELOG="${1:-${PUBLISH_CHANGELOG:-See the project changelog for details.}}"
 echo "changelog: $PUBLISH_CHANGELOG"
 
-TARGETS=(forge-1.18.2 forge-1.19.2 forge-1.20.1 fabric-1.20.1 fabric-1.21.1 fabric-26.1 neoforge-1.21.1 neoforge-26.1)
+TARGETS=(forge-1.18.2 forge-1.19.2 forge-1.20.1 fabric-1.20.1 fabric-1.21.1 fabric-26.1 neoforge-1.21.1 neoforge-26.1 neoforge-26.2)
 FAILED=()
 
 # 按 ci.properties 的 ci.java 挑 Gradle JVM；JAVA_HOME_<版本> 优先，否则用脚本启动时的 JAVA_HOME。

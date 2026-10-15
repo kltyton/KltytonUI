@@ -9,6 +9,7 @@ import io.github.kltyton.kltytonui.script.StandaloneRhinoRuntime;
 import io.github.kltyton.kltytonui.script.ecmascript.EcmaEventListener;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
 import io.github.kltyton.kltytonui.script.host.RhinoHostObject;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 import io.github.kltyton.kltytonui.spi.KuiScriptService;
 import io.github.kltyton.kltytonui.spi.KuiServices;
 import dev.latvian.mods.rhino.Callable;
@@ -18,6 +19,7 @@ import dev.latvian.mods.rhino.ScriptableObject;
 import org.junit.jupiter.api.Test;
 
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -46,6 +48,17 @@ class RhinoHostObjectTest {
                         + "+ typeof canvas.getContext + '|'"
                         + "+ (typeof canvas.getContext === 'function' && canvas.getContext('2d') != null);",
                 "specialized-canvas", 1, null));
+
+        assertEquals("first|changed|second", context.evaluateString(scope,
+                "var firstInput = document.createElement('input'); firstInput.value = 'first';"
+                        + "var secondInput = document.createElement('input'); secondInput.value = 'second';"
+                        + "var valueBridge = Object.getOwnPropertyDescriptor(firstInput, 'value');"
+                        + "var firstValue = valueBridge.get.call(secondInput);"
+                        + "valueBridge.set.call(secondInput, 'changed');"
+                        + "firstValue + '|' + firstInput.value + '|' + secondInput.value;",
+                "host-accessor-receiver", 1, null));
+        assertEquals(Boolean.FALSE, context.evaluateString(scope,
+                "firstInput.isConnected;", "detached-node-connectivity", 1, null));
     }
 
     @Test
@@ -74,7 +87,7 @@ class RhinoHostObjectTest {
     }
 
     @Test
-    void wrapperIdentityIsScopedToOneDocumentGeneration() {
+    void wrapperIdentityIsScopedToOneDocumentGeneration() throws ReflectiveOperationException {
         Document document = TestDocumentFactory.createDocument();
         Element element = document.createElement("div");
         Context context = RhinoTestSupport.enterContext();
@@ -90,10 +103,38 @@ class RhinoHostObjectTest {
         }
         assertSame(first, second);
 
+        AtomicInteger calls = new AtomicInteger();
+        Consumer<Object> staleCallback;
+        try (Document.ContextScope ignored = Document.withContext(document)) {
+            staleCallback = StandaloneRhinoRuntime.createCallback((Callable) (cx, owner, receiver, arguments) -> {
+                assertSame(document, Document.getContextDocument());
+                calls.incrementAndGet();
+                return null;
+            });
+        }
+        Document outerDocument = TestDocumentFactory.createDocument();
+        try (Document.ContextScope ignored = Document.withContext(outerDocument)) {
+            staleCallback.accept(null);
+            assertSame(outerDocument, Document.getContextDocument());
+        }
+        assertEquals(1, calls.get());
+        calls.set(0);
+        var generation = Document.class.getDeclaredField("refreshGeneration");
+        generation.setAccessible(true);
+        generation.setLong(document, document.getRefreshGeneration() + 1);
+        RhinoHostObject current;
+        try (Document.ContextScope ignored = Document.withContext(document)) {
+            current = StandaloneRhinoRuntime.wrapHostObject(element, firstDelegate, scope);
+            assertNotSame(first, current);
+            staleCallback.accept(null);
+        }
+        assertEquals(0, calls.get());
+
         StandaloneRhinoRuntime.release(document);
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            assertNotSame(first, StandaloneRhinoRuntime.wrapHostObject(element, firstDelegate, scope));
+            assertNotSame(current, StandaloneRhinoRuntime.wrapHostObject(element, firstDelegate, scope));
         }
+        StandaloneRhinoRuntime.release(document);
     }
 
     @Test
@@ -152,6 +193,14 @@ class RhinoHostObjectTest {
 
             assertEquals("17|true", context.evaluateString(scope,
                     "callbackResult", "event-host-value", 1, null));
+
+            RhinoTestSupport.putProperty(context, scope, "eventToClone",
+                    RhinoTestSupport.wrap(context, scope, new Event(document.body, "clone", false)));
+            assertEquals("false|undefined|original", context.evaluateString(scope,
+                    "eventToClone.testValue = 'original'; var clonedEvent = eventToClone.clone();"
+                            + "(clonedEvent === eventToClone) + '|' + (typeof clonedEvent.testValue)"
+                            + " + '|' + eventToClone.testValue;",
+                    "event-clone-expando", 1, null));
         } finally {
             KuiServices.setScript(previous);
         }
@@ -228,6 +277,13 @@ class RhinoHostObjectTest {
 
     public static final class ParentHost implements KuiScriptHost {
         private final NestedHost child;
+        private final ScriptHostBindings bindings = new ScriptHostBindings();
+
+        @Override
+        @dev.latvian.mods.rhino.util.HideFromJS
+        public ScriptHostBindings getScriptBindings() {
+            return bindings;
+        }
 
         public ParentHost(NestedHost child) {
             this.child = child;
@@ -239,9 +295,23 @@ class RhinoHostObjectTest {
     }
 
     public static final class NestedHost implements KuiScriptHost {
+        private final ScriptHostBindings bindings = new ScriptHostBindings();
+
+        @Override
+        @dev.latvian.mods.rhino.util.HideFromJS
+        public ScriptHostBindings getScriptBindings() {
+            return bindings;
+        }
     }
 
     public static final class EventLikeHost implements KuiScriptHost {
+        private final ScriptHostBindings bindings = new ScriptHostBindings();
+
+        @Override
+        @dev.latvian.mods.rhino.util.HideFromJS
+        public ScriptHostBindings getScriptBindings() {
+            return bindings;
+        }
     }
 
     private record TestScriptService(Context context, Scriptable scope) implements KuiScriptService {

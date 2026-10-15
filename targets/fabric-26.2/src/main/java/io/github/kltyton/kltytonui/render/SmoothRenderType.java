@@ -42,7 +42,7 @@ public final class SmoothRenderType {
                 .withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
                 .withPrimitiveTopology(PrimitiveTopology.QUADS)
                 .withDepthStencilState(depthTest
-                        ? Optional.of(new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, false))
+                        ? Optional.of(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
                         : Optional.empty())
                 .withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
                         GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))

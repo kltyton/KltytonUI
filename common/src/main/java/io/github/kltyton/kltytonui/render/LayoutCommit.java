@@ -325,14 +325,14 @@ public final class LayoutCommit {
         if (!target.getRenderer().hasCommittedRect(rectDependency)) {
             Rect rect = Rect.createAndCache(target);
             rect.getVisualBounds();
-            target.getRenderer().commitRect(rect, rectDependency);
+            target.getRenderer().commitRect(rect, target.getRenderer().rectDependency(target.document));
         }
 
         long transformDependency = target.getRenderer().transformDependency(target.document);
         if (!target.getRenderer().hasCommittedWorldTransform(transformDependency)) {
             try {
                 Matrix4f matrix = Base.createAndCacheWorldTransform(target);
-                target.getRenderer().commitWorldTransform(matrix, transformDependency);
+                target.getRenderer().commitWorldTransform(matrix, target.getRenderer().transformDependency(target.document));
             } catch (NoClassDefFoundError unavailableRenderRuntime) {
                 if (!isOptionalRenderDependency(unavailableRenderRuntime)) throw unavailableRenderRuntime;
             }
@@ -451,7 +451,7 @@ public final class LayoutCommit {
         }
         try {
             Matrix4f matrix = Base.createAndCacheWorldTransform(target);
-            target.getRenderer().commitWorldTransform(matrix, transformDependency);
+            target.getRenderer().commitWorldTransform(matrix, target.getRenderer().transformDependency(target.document));
         } catch (NoClassDefFoundError unavailableRenderRuntime) {
             if (!isOptionalRenderDependency(unavailableRenderRuntime)) throw unavailableRenderRuntime;
         }
@@ -475,7 +475,7 @@ public final class LayoutCommit {
         if (target.getRenderer().hasCommittedWorldTransform(transformDependency)) return false;
         try {
             Matrix4f matrix = Base.createAndCacheWorldTransform(target);
-            target.getRenderer().commitWorldTransform(matrix, transformDependency);
+            target.getRenderer().commitWorldTransform(matrix, target.getRenderer().transformDependency(target.document));
         } catch (NoClassDefFoundError unavailableRenderRuntime) {
             if (!isOptionalRenderDependency(unavailableRenderRuntime)) throw unavailableRenderRuntime;
         }

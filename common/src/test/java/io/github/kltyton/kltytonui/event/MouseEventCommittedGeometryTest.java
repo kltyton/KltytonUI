@@ -36,11 +36,13 @@ class MouseEventCommittedGeometryTest {
     @Test
     void boundingRectUsesTheCommittedSizeSnapshot() {
         Document document = TestDocumentFactory.createDocument();
+        document.applyViewport(false);
         GuardedElement element = new GuardedElement(document);
         element.setAttribute("style", "width:80px;height:30px;margin:4px;");
         document.body.appendChild(element);
 
-        Rect committed = Rect.of(element);
+        document.commitRenderState();
+        Rect committed = element.getRenderer().getCommittedRect();
         element.rejectLayout = true;
 
         Element.DOMRect bounds = element.getBoundingClientRect();

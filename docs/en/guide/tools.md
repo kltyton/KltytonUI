@@ -14,15 +14,16 @@ Environment: the Node client needs Node 22+; MCP needs Node 20+ plus `npm instal
 
 ## Enabling the External Debug Service
 
-All the tool chains connect to the in-game debug service at the fixed address `ws://127.0.0.1:25321/kltytonui`. How to enable it (enabled by default in dev environments):
+The tools connect to the in-game debug service, whose default address is `ws://127.0.0.1:25322/kltytonui`. Set `-Dkltytonui.debug.port=PORT` to change the port; use the endpoint recorded in `kltytonui/debug.json` under the game directory when connecting. To enable the service:
 
 ```toml
-# config/kltytonui-client.toml
+# Forge: config/kltytonui-client.toml
+# NeoForge: config/kltytonui_config.toml
 [debug]
 remoteDebug = true
 ```
 
-Once the service starts, it writes `run/kltytonui/debug.json` in the game directory (endpoint + token + pid). The token is randomly generated on each launch; pin it with `-Dkltytonui.debug.token=...`, or disable the service with `-Dkltytonui.debug.enabled=false`.
+Once the service starts, it writes `kltytonui/debug.json` in the game directory (endpoint + token + pid). The token is randomly generated on each launch; pin it with `-Dkltytonui.debug.token=...`, or disable the service with `-Dkltytonui.debug.enabled=false`.
 
 **debug.json is an access credential** — whoever has it can drive the real UI of the running client. Don't commit it, don't share it. When you can't connect, check first whether this file exists.
 

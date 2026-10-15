@@ -56,6 +56,7 @@ import io.github.kltyton.kltytonui.util.Storage;
 import io.github.kltyton.kltytonui.event.Event;
 import io.github.kltyton.kltytonui.event.ScriptEventListeners;
 import io.github.kltyton.kltytonui.style.Style;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 
 public class Window implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
     public static final Window window = new Window();
@@ -79,6 +80,7 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
     private volatile long animationTimeMillis = (long) performance.now();
     private volatile boolean animationTimelinePaused;
     private final Console console = new Console();
+    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
     private final CopyOnWriteArrayList<IntersectionObserver> intersectionObservers = new CopyOnWriteArrayList<>();
     private final ConcurrentLinkedQueue<IntersectionDelivery> pendingIntersectionDeliveries = new ConcurrentLinkedQueue<>();
     private final CopyOnWriteArrayList<ResizeObserver> resizeObservers = new CopyOnWriteArrayList<>();
@@ -117,6 +119,12 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         long generation = document == null ? -1L : document.getRefreshGeneration();
         microtasks.add(new Microtask(document, generation, callback));
         if (scriptTaskDepth.get() == 0) scheduleMicrotaskDrain();
+    }
+
+    @Override
+    @dev.latvian.mods.rhino.util.HideFromJS
+    public final ScriptHostBindings getScriptBindings() {
+        return scriptBindings;
     }
 
     public void beginScriptTask() {
@@ -343,6 +351,15 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
     public boolean supportsScriptEventListenerOptions() {
         return true;
+    }
+
+    @HideFromJS
+    public void clearDocumentListeners(Document document) {
+        scriptListeners.clear(document);
+        for (CopyOnWriteArrayList<Event.ListenerRecord> typeListeners : listeners.values()) {
+            typeListeners.removeIf(listener -> listener.listener() instanceof WindowListenerAdapter adapter
+                    && adapter.document == document);
+        }
     }
 
     public boolean dispatchEvent(Object event) {
@@ -692,6 +709,8 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
     private static final class WindowListenerAdapter implements Consumer<Event> {
         private final Consumer<? super Event> delegate;
+        private final Document document = Document.getContextDocument();
+        private final long generation = document == null ? -1L : document.getRefreshGeneration();
 
         private WindowListenerAdapter(Consumer<? super Event> delegate) {
             this.delegate = delegate;
@@ -699,7 +718,10 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
         @Override
         public void accept(Event event) {
-            delegate.accept(event);
+            if (!isScheduledDocumentValid(document, generation)) return;
+            try (Document.ContextScope ignored = Document.withContext(document)) {
+                delegate.accept(event);
+            }
         }
     }
 
@@ -791,6 +813,18 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
         public String getDisplay() {
             return getPropertyValue("display");
+        }
+
+        public String getOverflow() {
+            return getPropertyValue("overflow");
+        }
+
+        public String getOverflowX() {
+            return getPropertyValue("overflow-x");
+        }
+
+        public String getOverflowY() {
+            return getPropertyValue("overflow-y");
         }
 
         public String getColor() {
@@ -970,6 +1004,13 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
     public static class Console implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
         private final Map<String, Long> timers = new ConcurrentHashMap<>();
+        private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
+
+        @Override
+        @dev.latvian.mods.rhino.util.HideFromJS
+        public final ScriptHostBindings getScriptBindings() {
+            return scriptBindings;
+        }
 
         public void log(Object value) {
             KltytonUI.LOGGER.info(String.valueOf(value));

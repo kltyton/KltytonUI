@@ -80,16 +80,11 @@ public final class Client {
             Tooltip.moveActiveFromScreen(mousePosition);
             DevTools.handleInspectMouseMove(mousePosition);
         }
-        FrameTimingHud.beginFrame();
-        try {
-            if (!linkedScreen) {
-                KltytonGuiLayers.submitUi(graphics);
-            }
-            KltytonGuiLayers.submitCursor(graphics);
-        } finally {
-            FrameTimingHud.endFrame();
-            drawFrameTimingHud(graphics);
+        if (!linkedScreen) {
+            KltytonGuiLayers.submitUi(graphics);
         }
+        KltytonGuiLayers.submitCursor(graphics);
+        drawFrameTimingHud(graphics);
     }
 
     public static void drawOverlayLike(GuiGraphicsExtractor graphics) {
@@ -102,14 +97,9 @@ public final class Client {
         Position mousePosition = getMousePosition();
         Tooltip.moveActiveFromScreen(mousePosition);
         DevTools.handleInspectMouseMove(mousePosition);
-        FrameTimingHud.beginFrame();
-        try {
-            // submitOverlay = 文档状态 + 伪光标，两者都由 PIP 层按层序合成。
-            KltytonGuiLayers.submitOverlay(graphics);
-        } finally {
-            FrameTimingHud.endFrame();
-            drawFrameTimingHud(graphics);
-        }
+        // Overlay documents and cursor are rasterised later by the PIP renderer.
+        KltytonGuiLayers.submitOverlay(graphics);
+        drawFrameTimingHud(graphics);
     }
 
     /** Dispatches a native keyboard event to the common KUI input pipeline. */

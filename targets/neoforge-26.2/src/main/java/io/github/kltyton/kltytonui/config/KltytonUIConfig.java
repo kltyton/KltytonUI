@@ -42,7 +42,7 @@ public final class KltytonUIConfig {
                     .comment("Show the KUI per-frame timing monitor in the top-left corner.")
                     .define("frameTimingHud", false);
             remoteDebug = builder
-                    .comment("Enable the loopback-only Kltyton external debugger on port 25321.")
+                    .comment("Enable the loopback-only Kltyton external debugger (default port: 25322).")
                     .define("remoteDebug", false);
             builder.pop();
 

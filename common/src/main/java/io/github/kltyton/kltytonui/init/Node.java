@@ -12,6 +12,7 @@ import io.github.kltyton.kltytonui.dom.CommentNode;
 import io.github.kltyton.kltytonui.dom.DocumentFragment;
 import io.github.kltyton.kltytonui.dom.TextNode;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 import dev.latvian.mods.rhino.util.HideFromJS;
 
 public abstract class Node implements KuiScriptHost {
@@ -27,12 +28,19 @@ public abstract class Node implements KuiScriptHost {
     public final ArrayList<Node> childNodes = new ArrayList<>();
     public int depth = 0;
     private long subtreeMutationVersion = 1L;
+    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
 
     private final EventRegistry events = new EventRegistry(this);
     public CopyOnWriteArrayList<Event.ListenerRecord> EventListener = events.listeners();
 
     protected Node(Document document) {
         this.document = document;
+    }
+
+    @Override
+    @HideFromJS
+    public final ScriptHostBindings getScriptBindings() {
+        return scriptBindings;
     }
 
     public Document getOwnerDocument() {
@@ -122,6 +130,7 @@ public abstract class Node implements KuiScriptHost {
 
     public Node appendChild(Node node) {
         if (document == null || node == null) return null;
+        if (node == this || node.contains(this)) return node;
         if (node instanceof DocumentFragment fragment) {
             if (isConnected()) {
                 return document.getTree().insertFragment(fragment, this, null);
@@ -138,7 +147,8 @@ public abstract class Node implements KuiScriptHost {
 
     public Node removeChild(Node node) {
         if (document == null || node == null || node.parentNode != this) return null;
-        document.removeNode(node);
+        if (isConnected()) document.removeNode(node);
+        else detachLocalChild(node);
         return node;
     }
 
@@ -156,6 +166,7 @@ public abstract class Node implements KuiScriptHost {
 
     public Node insertBefore(Node newNode, Node referenceNode) {
         if (document == null || newNode == null) return null;
+        if (newNode == referenceNode || newNode == this || newNode.contains(this)) return newNode;
         if (newNode instanceof DocumentFragment fragment) {
             if (isConnected()) {
                 return document.getTree().insertFragment(fragment, this, referenceNode);
@@ -177,9 +188,10 @@ public abstract class Node implements KuiScriptHost {
 
     public Node replaceChild(Node newNode, Node oldNode) {
         if (document == null || newNode == null || oldNode == null || oldNode.parentNode != this) return null;
+        if (newNode == oldNode || newNode == this || newNode.contains(this)) return oldNode;
         if (newNode instanceof DocumentFragment fragment) {
             Node nextSibling = oldNode.getNextSibling();
-            document.removeNode(oldNode);
+            removeChild(oldNode);
             if (isConnected()) {
                 document.getTree().insertFragment(fragment, this, nextSibling);
                 return oldNode;
@@ -228,22 +240,35 @@ public abstract class Node implements KuiScriptHost {
         if (node == null) return;
         // 断开状态下插入也会改变单元的渲染子节点集合，选择缓存随之失效
         if (document != null) document.bumpSelectionCache();
-        detachLocalChild(node);
+        if (node.parentNode == this && childNodes.indexOf(node) < index) index--;
+        if (node.isConnected()) node.document.removeNode(node);
+        else detachLocalChild(node);
         int safeIndex = Math.max(0, Math.min(index, childNodes.size()));
         childNodes.add(safeIndex, node);
         node.parentNode = this;
-        node.document = document;
-        node.depth = depth + 1;
+        updateLocalSubtree(node, document, depth + 1);
+        if (node instanceof Element childElement) childElement.invalidateSubtreeAfterAttach();
         if (this instanceof Element parentElement) {
+            parentElement.refreshElementChildrenFromChildNodes();
             if (node instanceof Element childElement) {
                 childElement.parentElement = parentElement;
                 childElement.syncDomStateAfterAttach();
             }
-            parentElement.refreshElementChildrenFromChildNodes();
+            parentElement.syncSelectStateAfterChildrenChanged();
         } else if (node instanceof Element childElement) {
             childElement.parentElement = null;
             childElement.syncDomStateAfterAttach();
         }
+    }
+
+    private static void updateLocalSubtree(Node node, Document document, int depth) {
+        node.document = document;
+        node.depth = depth;
+        if (node instanceof Element element) {
+            element.parentElement = node.parentNode instanceof Element parentElement ? parentElement : null;
+            element.getRenderer().route.clear();
+        }
+        for (Node child : node.childNodes) updateLocalSubtree(child, document, depth + 1);
     }
 
     private static void detachLocalChild(Node node) {
@@ -255,6 +280,7 @@ public abstract class Node implements KuiScriptHost {
         oldParent.childNodes.remove(node);
         if (oldParent instanceof Element oldParentElement) {
             oldParentElement.refreshElementChildrenFromChildNodes();
+            oldParentElement.syncSelectStateAfterChildrenChanged();
         }
         node.parentNode = null;
         if (node instanceof Element childElement) {
@@ -312,7 +338,8 @@ public abstract class Node implements KuiScriptHost {
 
     public void remove() {
         if (document == null) return;
-        document.removeNode(this);
+        if (parentNode != null) parentNode.removeChild(this);
+        else if (isConnected()) document.removeNode(this);
     }
 
     public boolean dispatchEvent(Object event) {

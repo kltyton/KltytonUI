@@ -1,5 +1,6 @@
 package io.github.kltyton.kltytonui.fabric;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.client.Client;
 import io.github.kltyton.kltytonui.client.DebugAIScreenshotTicker;
@@ -74,10 +75,24 @@ public final class KltytonUIFabricClient implements ClientModInitializer {
             // poseStack 同样是局部栈，相机视图矩阵在 render state 里单独存。
             Matrix4f viewMatrix = context.levelState().cameraRenderState.viewRotationMatrix;
             float partialTick = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
-            // 先把 KUI 记录的投影同步成世界投影，世界文档里的滤镜通道才能取回正确矩阵。
-            RenderService.INSTANCE.setProjectionMatrix(new Matrix4f(projectionMatrix));
-            for (WorldWindow window : WorldWindow.windows) {
-                window.render(context.poseStack(), viewMatrix, projectionMatrix, partialTick);
+            Matrix4f previousStoredProjection = RenderService.INSTANCE.getProjectionMatrix();
+            var previousProjection = RenderSystem.getProjectionMatrixBuffer();
+            var previousProjectionType = RenderSystem.getProjectionType();
+            var modelView = RenderSystem.getModelViewStack();
+            modelView.pushMatrix();
+            try {
+                modelView.set(viewMatrix);
+                RenderService.INSTANCE.setProjectionMatrix(new Matrix4f(projectionMatrix));
+                for (WorldWindow window : WorldWindow.windows) {
+                    window.render(context.poseStack(), viewMatrix, projectionMatrix, partialTick);
+                }
+            } finally {
+                try {
+                    RenderService.INSTANCE.setProjectionMatrix(previousStoredProjection);
+                } finally {
+                    modelView.popMatrix();
+                    RenderSystem.setProjectionMatrix(previousProjection, previousProjectionType);
+                }
             }
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->

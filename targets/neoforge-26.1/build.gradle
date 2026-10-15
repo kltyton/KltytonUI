@@ -163,6 +163,12 @@ tasks.named('sourcesJar', Jar).configure {
 
 tasks.named('processResources', ProcessResources).configure {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // This runtime uses named Mixin targets rather than a legacy refmap.
+    def excludedMixinRefmap = '"refmap":'
+    inputs.property('excludedMixinRefmap', excludedMixinRefmap)
+    filesMatching('kltytonui.mixins.json') {
+        filter { line -> line.contains(excludedMixinRefmap) ? null : line }
+    }
     exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: neoforge_261_minecraft_version,

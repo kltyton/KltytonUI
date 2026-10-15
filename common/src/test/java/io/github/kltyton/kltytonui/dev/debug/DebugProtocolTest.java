@@ -27,8 +27,7 @@ class DebugProtocolTest {
         JsonObject result = new DebugProtocolSession().handle(request).getAsJsonObject();
 
         assertEquals(1, result.get("protocolVersion").getAsInt());
-        assertEquals(25321, ExternalDebugServer.PORT);
-        assertTrue(result.get("endpoint").getAsString().contains(":25321/"));
+        assertEquals(ExternalDebugServer.ENDPOINT, result.get("endpoint").getAsString());
     }
 
     @Test

@@ -173,7 +173,7 @@ public final class ElementTree {
     }
 
     public void recordId(Element element) {
-        if (element == null || element.id == null || element.id.isBlank()) return;
+        if (element == null || !element.isConnected() || element.id == null || element.id.isBlank()) return;
         idMap.put(element.id, element);
     }
 
@@ -196,11 +196,11 @@ public final class ElementTree {
         // 子树挂载改变单元的渲染子节点集合，选择缓存随之失效
         if (owner != null) owner.bumpSelectionCache();
         KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
-        sourceTree.detachSubtree(child);
-        // Moving the only required Item within its existing Slot/Ingredient can
-        // restore a placeholder during detach; validate once more before attach
-        // so the moved node remains the sole direct content element.
-        KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
+        if (oldParent != null || child.isConnected() || sourceTree != this) {
+            sourceTree.detachSubtree(child);
+            // Detaching required Slot/Ingredient content may restore a placeholder.
+            KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
+        }
 
         int textSourceBefore = renderTextSourceMode(parent);
         int safeIndex = Math.max(0, Math.min(childIndex, parent.childNodes.size()));

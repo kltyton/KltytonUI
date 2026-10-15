@@ -31,6 +31,11 @@ public final class FabricClientService implements KuiClientService {
     public static final FabricClientService INSTANCE = new FabricClientService();
 
     @Override
+    public void executeOnClientThread(Runnable action) {
+        Minecraft.getInstance().execute(action);
+    }
+
+    @Override
     public Map<String, String> readLocalStorage(Path file) throws IOException {
         CompoundTag tag = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
         Map<String, String> values = new HashMap<>();

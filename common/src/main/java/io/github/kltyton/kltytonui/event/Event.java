@@ -14,6 +14,7 @@ import io.github.kltyton.kltytonui.form.FormData;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
+import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 
 public class Event implements Cloneable, KuiScriptHost {
 
@@ -47,6 +48,13 @@ public class Event implements Cloneable, KuiScriptHost {
     private boolean immediatePropagationStopped = false;
     private int passiveListenerDepth;
     private ArrayList<Object> composedPath = new ArrayList<>();
+    private transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
+
+    @Override
+    @dev.latvian.mods.rhino.util.HideFromJS
+    public final ScriptHostBindings getScriptBindings() {
+        return scriptBindings;
+    }
 
     public Event(Object target, String type) {
         this.target = target;
@@ -139,6 +147,7 @@ public class Event implements Cloneable, KuiScriptHost {
     public Event clone() {
         try {
             Event copy = (Event) super.clone();
+            copy.scriptBindings = new ScriptHostBindings();
             copyTo(copy);
             return copy;
         } catch (CloneNotSupportedException e) {

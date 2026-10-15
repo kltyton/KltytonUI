@@ -46,6 +46,7 @@ public class Box {
     public final List<Shadow> shadows = new ArrayList<>();
     public Shadow shadow = null;
     public BorderImage borderImage = null;
+    public Outline outline = Outline.NONE;
     public Element element;
     private Size cachedRawElementSize;
     private Size cachedRawInnerSize;
@@ -164,6 +165,7 @@ public class Box {
             };
         }
 
+        resultBox.outline = parseOutline(style, element);
         return resultBox;
     }
 
@@ -524,6 +526,35 @@ public class Box {
         String color = currentColor != null && "currentcolor".equalsIgnoreCase(res[2])
                 ? currentColor : res[2];
         return new SideBorder(Math.max(0, width), res[1], new Color(color));
+    }
+
+    private static Outline parseOutline(Style style, Element element) {
+        String line = style.outlineStyle == null ? "none" : style.outlineStyle.trim().toLowerCase(Locale.ROOT);
+        boolean visible = switch (line) {
+            case "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset", "auto" -> true;
+            default -> false;
+        };
+        if (!visible) return Outline.NONE;
+        String rawWidth = style.outlineWidth == null ? "medium" : style.outlineWidth.trim().toLowerCase(Locale.ROOT);
+        double width = switch (rawWidth) {
+            case "thin" -> 1;
+            case "medium" -> 3;
+            case "thick" -> 5;
+            default -> Math.max(0, Size.resolveLength(rawWidth, 0, 0, element));
+        };
+        String color = style.outlineColor;
+        boolean usesTextColor = color == null || "auto".equalsIgnoreCase(color) || "currentcolor".equalsIgnoreCase(color);
+        if (usesTextColor) color = style.color;
+        return new Outline(width, "dashed".equals(line), Color.parse(color), usesTextColor,
+                Size.resolveLength(style.outlineOffset, 0, 0, element));
+    }
+
+    public record Outline(double width, boolean dashed, int color, boolean usesTextColor, double offset) {
+        public static final Outline NONE = new Outline(0, false, 0, false, 0);
+
+        public boolean isVisible() {
+            return width > 0;
+        }
     }
 
     public static Shadow parseShadow(String string) {

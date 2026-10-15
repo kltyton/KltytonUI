@@ -117,6 +117,7 @@ class StyleMetricsInvalidationTest {
         // 过渡原地改写走 Style.update()
         buffer.update("width", "77px");
         assertEquals(77.0, buffer.widthLength().resolve(0), 1e-9);
+
     }
 
     /** 布局几何必须跟随 StyleFrameCache 里的克隆帧样式（motion 路径）。 */

@@ -68,8 +68,8 @@ class OreThemeTest {
 
     @Test
     void optionalFontsAndRuntimeNoticesArePackaged() throws Exception {
-        assertTrue(read("runtime/vue.aui.js").contains("Copyright (c) 2018-present, Yuxi (Evan) You"));
-        assertTrue(read("runtime/mcui/mcui-oreui.aui.js").contains("Copyright (c) 2026 mcui-oreui contributors"));
+        assertTrue(read("runtime/vue.kui.js").contains("Copyright (c) 2018-present, Yuxi (Evan) You"));
+        assertTrue(read("runtime/mcui/mcui-oreui.kui.js").contains("Copyright (c) 2026 mcui-oreui contributors"));
         assertTrue(read("theme/ore/license.txt").contains("Mozilla Public License Version 2.0"));
         assertTrue(read("runtime/mcui/fonts.css").contains("fonts/minecraft_ten.otf"));
         for (String name : new String[]{"minecraft_ten.otf", "minecraft_seven.otf",

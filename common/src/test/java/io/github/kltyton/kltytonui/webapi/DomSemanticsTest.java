@@ -169,7 +169,13 @@ class DomSemanticsTest {
     void disconnectedAttributeWritesDoNotQueueRenderWorkUntilMounted() {
         Document document = TestDocumentFactory.createDocument();
         document.getDirtyElements().clear();
-        Element row = new Element(document, "div");
+        AtomicInteger disconnects = new AtomicInteger();
+        Element row = new Element(document, "div") {
+            @Override
+            public void onDisconnectedFromDocument() {
+                disconnects.incrementAndGet();
+            }
+        };
         Element cell = new Element(document, "span");
 
         row.setAttribute("class", "row");
@@ -180,6 +186,8 @@ class DomSemanticsTest {
 
         assertFalse(row.isConnected());
         assertFalse(cell.isConnected());
+        assertFalse(document.getElements().contains(row));
+        assertFalse(document.getElements().contains(cell));
         assertTrue(document.getDirtyElements().isEmpty(), () -> "dirty=" + document.getDirtyElements());
 
         document.body.appendChild(row);
@@ -187,6 +195,12 @@ class DomSemanticsTest {
         assertTrue(row.isConnected());
         assertTrue(cell.isConnected());
         assertTrue(document.getDirtyElements().contains(row));
+        assertEquals(0, disconnects.get());
+
+        document.body.removeChild(row);
+        assertEquals(1, disconnects.get());
+        document.body.appendChild(row);
+        assertEquals(1, disconnects.get());
     }
 
     @Test
@@ -340,8 +354,6 @@ class DomSemanticsTest {
         source.body.appendChild(sourceParent);
         sourceParent.appendChild(moved);
         moved.appendChild(nested);
-        destination.body.appendChild(destinationParent);
-
         destinationParent.appendChild(moved);
 
         assertTrue(sourceParent.getChildNodes().isEmpty());
@@ -351,6 +363,12 @@ class DomSemanticsTest {
         assertFalse(source.getElements().contains(nested));
         assertNull(source.getElementById("moved"));
         assertNull(source.getElementById("nested"));
+        assertFalse(moved.isConnected());
+        assertFalse(destination.getNodes().contains(moved));
+        assertSame(destination, moved.getOwnerDocument());
+        assertSame(destination, nested.getOwnerDocument());
+
+        destination.body.appendChild(destinationParent);
 
         int movedIndex = destination.getNodes().indexOf(moved);
         assertEquals(List.of(moved, nested), destination.getNodes().subList(movedIndex, movedIndex + 2));
@@ -656,6 +674,7 @@ class DomSemanticsTest {
     void cloneNodeSupportsShallowAndDeepCopiesAcrossNodeTypes() {
         Document document = TestDocumentFactory.createDocument();
         Element host = new Element(document, "div");
+        host.setAttribute("onclick", "this.setAttribute('data-clicked', 'yes')");
         Element child = new Element(document, "span");
         TextNode textNode = document.createTextNode("hello");
         CommentNode commentNode = document.createComment("marker");
@@ -674,6 +693,8 @@ class DomSemanticsTest {
 
         assertTrue(shallow.getChildNodes().isEmpty());
         assertEquals(host.getAttributes(), shallow.getAttributes());
+        assertTrue(shallow.EventListener.stream().anyMatch(listener ->
+                "click".equals(listener.type()) && !listener.internal()));
 
         assertEquals(3, deep.getChildNodes().size());
         assertTrue(deep.getFirstChild() instanceof TextNode);
@@ -786,12 +807,15 @@ class DomSemanticsTest {
     void windowComputedStyleExposesInlineComputedValues() {
         Document document = TestDocumentFactory.createDocument();
         Element element = new Element(document, "div");
-        element.setAttribute("style", "width: 10px; height: 20px; display: block;");
+        element.setAttribute("style", "width: 10px; height: 20px; display: block; overflow: auto; overflow-y: hidden;");
 
         Window.CSSStyleDeclaration style = new Window().getComputedStyle(element);
         assertEquals("10px", style.getPropertyValue("width"));
         assertEquals("20px", style.get("height"));
         assertEquals("block", style.getPropertyValue("display"));
+        assertEquals("auto", style.getOverflow());
+        assertEquals("auto", style.getOverflowX());
+        assertEquals("hidden", style.getOverflowY());
         assertEquals("", style.getPropertyValue("missing-prop"));
     }
 

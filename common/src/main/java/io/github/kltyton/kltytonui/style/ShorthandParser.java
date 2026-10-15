@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.style;
 
 import io.github.kltyton.kltytonui.layout.Layout;
+import io.github.kltyton.kltytonui.layout.CssLength;
 import io.github.kltyton.kltytonui.layout.Size;
 
 import java.util.ArrayList;
@@ -177,6 +178,55 @@ public final class ShorthandParser {
         String lower = token.trim().toLowerCase(Locale.ROOT);
         return lower.equals("0")
                 || lower.matches("-?\\d+(?:\\.\\d+)?(?:px|rem|em|vw|vh|%)?");
+    }
+
+    /** Expands outline components before the cascade compares their longhands. */
+    public static void applyOutline(Style style, String raw) {
+        String value = raw == null ? "" : raw.trim();
+        style.outline = value.isEmpty() ? "unset" : value;
+        if (value.isEmpty() || isCssWideKeyword(value)) {
+            String keyword = value.isEmpty() ? "unset" : value;
+            style.outlineWidth = keyword;
+            style.outlineStyle = keyword;
+            style.outlineColor = keyword;
+            return;
+        }
+
+        List<String> tokens = CssString.splitTopLevelTokens(value);
+        String width = "medium";
+        String line = "none";
+        String color = "auto";
+        boolean lineSeen = false;
+        for (String token : tokens) {
+            String normalized = token.toLowerCase(Locale.ROOT);
+            if (isBorderStyleToken(normalized) || "auto".equals(normalized)) {
+                line = normalized;
+                lineSeen = true;
+            } else if ("thin".equals(normalized) || "medium".equals(normalized) || "thick".equals(normalized)
+                    || CssLength.parse(token).hasNumber() || normalized.startsWith("calc(")
+                    || normalized.startsWith("min(") || normalized.startsWith("max(")
+                    || normalized.startsWith("clamp(")) {
+                width = token;
+            } else if (CssString.isColorToken(token) || "currentcolor".equals(normalized)) {
+                color = token;
+            } else if (isVarToken(token)) {
+                if (lineSeen) color = token;
+                else width = token;
+            }
+        }
+        style.outlineWidth = width;
+        style.outlineStyle = line;
+        style.outlineColor = color;
+    }
+
+    public static Map<String, String> expandOutline(String raw) {
+        Style probe = new Style();
+        applyOutline(probe, raw);
+        Map<String, String> longhands = new LinkedHashMap<>();
+        putLonghand(longhands, "outline-width", probe.outlineWidth);
+        putLonghand(longhands, "outline-style", probe.outlineStyle);
+        putLonghand(longhands, "outline-color", probe.outlineColor);
+        return longhands;
     }
 
     public static void applyBackground(Style style, String raw) {

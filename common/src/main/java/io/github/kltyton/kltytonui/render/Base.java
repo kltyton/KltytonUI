@@ -16,6 +16,7 @@ import io.github.kltyton.kltytonui.style.*;
 import io.github.kltyton.kltytonui.init.Window;
 import net.minecraft.client.Minecraft;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
@@ -33,7 +34,8 @@ public class Base {
     public enum RenderPhase {
         SHADOW,
         BODY,
-        BORDER
+        BORDER,
+        OUTLINE
     }
 
     private static final float DEFAULT_DEPTH_STEP = 0.005f;
@@ -679,6 +681,10 @@ public class Base {
 
     /** 元素自身或任一祖先是否带 transform。只看已提交的样式快照，不为了量矩形触发样式计算。 */
     public static boolean hasVisualTransform(Element element) {
+        Matrix4f cachedTransform = WorldPaintDepth.canReuseCommittedTransforms()
+                ? TransformFrameCache.get(element)
+                : TransformFrameCache.getFrame(element);
+        if (cachedTransform != null) return (cachedTransform.properties() & Matrix4fc.PROPERTY_IDENTITY) == 0;
         for (Element current = element; current != null; current = current.parentElement) {
             List<Transform> cached = current.getRenderer().transform.get();
             if (cached != null) {

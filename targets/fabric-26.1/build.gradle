@@ -78,9 +78,13 @@ dependencies {
 
 tasks.named('processResources', ProcessResources).configure {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    // The shared resource is consumed by the NeoForge KubeJS plugin. Fabric's
-    // script service is intentionally optional/no-op, so do not advertise a
-    // plugin class that is not present in this loader target.
+    // This runtime uses named Mixin targets rather than a legacy refmap.
+    def excludedMixinRefmap = '"refmap":'
+    inputs.property('excludedMixinRefmap', excludedMixinRefmap)
+    filesMatching('kltytonui.mixins.json') {
+        filter { line -> line.contains(excludedMixinRefmap) ? null : line }
+    }
+    // Fabric does not provide the NeoForge KubeJS plugin named by this descriptor.
     exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: fabric_minecraft_version,

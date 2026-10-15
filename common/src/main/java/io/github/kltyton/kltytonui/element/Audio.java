@@ -239,16 +239,11 @@ public class Audio extends Element {
         player.setCurrentTime(fraction * duration);
     }
 
-    /**
-     * 屏幕文档每帧直读 GLFW 光标（GUI 坐标 → 文档坐标）：mousemove 事件走输入轮询
-     * 缓存，频率低、坐标可能滞后，拖拽会卡顿。世界窗指针坐标系不同（返回 null，
-     * 仍走事件路径）；headless 无窗口也返回 null。
-     */
+    /** Samples the native screen pointer used by mouse events, in document coordinates. */
     private Position livePointerInDocument() {
         if (document == null || document.inWorld) return null;
-        Position mouse = io.github.kltyton.kltytonui.spi.KuiServices.client().getMousePositionDirectly();
-        if (mouse == null) return null;
-        return document.screenToDocumentPosition(mouse);
+        var client = io.github.kltyton.kltytonui.spi.KuiServices.client();
+        return client.getWindowHandle() == 0 ? null : document.screenToDocumentPosition(client.getMousePosition());
     }
 
     private static float controlButtonSize(double height) {

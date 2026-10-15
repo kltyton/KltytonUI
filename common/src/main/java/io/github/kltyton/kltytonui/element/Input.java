@@ -72,8 +72,7 @@ public class Input extends AbstractText {
         addInternalEventListener("mousemove", event -> {
             if (!(event instanceof MouseEvent mouse)
                     || getMode() != Mode.RANGE || !rangeDragging || isDisabled()) return;
-            // mousemove 是 20Hz tick 派发的旧缓存坐标；有每帧直读路径时让它接管取值，
-            // 否则旧坐标会把每帧算出的新值覆盖回去，滑块来回跳。
+            // Screen ranges sample the native pointer once before frame callbacks.
             if (livePointerOrNull() != null) return;
             if (setRangeValueFromPointer(mouse)) {
                 rangeValueChanged = true;
@@ -689,10 +688,11 @@ public class Input extends AbstractText {
         }
     }
 
-    /** 每帧直读的 GLFW 光标（屏幕文档 + 有窗口时非 null）；headless/世界窗返回 null。 */
+    /** Uses the same native pointer sample as mouse events; world windows keep their projected coordinates. */
     private Position livePointerOrNull() {
         if (document == null || document.inWorld) return null;
-        return io.github.kltyton.kltytonui.spi.KuiServices.client().getMousePositionDirectly();
+        var client = io.github.kltyton.kltytonui.spi.KuiServices.client();
+        return client.getWindowHandle() == 0 ? null : client.getMousePosition();
     }
 
     private void flushRangeInputEvent() {

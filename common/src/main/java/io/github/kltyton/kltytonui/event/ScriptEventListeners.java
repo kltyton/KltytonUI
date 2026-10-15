@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.event;
 
 import io.github.kltyton.kltytonui.spi.KuiServices;
+import io.github.kltyton.kltytonui.init.Document;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -64,6 +65,16 @@ public final class ScriptEventListeners {
         }
     }
 
+    public synchronized void clear(Document document) {
+        for (List<Registration> callbackRegistrations : List.copyOf(registrations.values())) {
+            for (Registration registration : List.copyOf(callbackRegistrations)) {
+                if (registration.document != document) continue;
+                target.remove(registration.type, registration.listener, registration.capture);
+                forget(registration);
+            }
+        }
+    }
+
     private synchronized void forget(Registration registration) {
         List<Registration> callbackRegistrations = registrations.get(registration.callback);
         if (callbackRegistrations == null) return;
@@ -78,6 +89,7 @@ public final class ScriptEventListeners {
     }
 
     private static final class Registration {
+        private final Document document = Document.getContextDocument();
         private final String type;
         private final Object callback;
         private final boolean capture;
