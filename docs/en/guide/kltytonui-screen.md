@@ -2,7 +2,6 @@
 
 KltytonScreen is KUI's wrapper around a Minecraft Screen: it loads an HTML file into a Document, draws it onto the current screen, and forwards mouse, keyboard, and wheel input to it.
 
-The KubeJS examples below apply to Forge 1.20.1 and NeoForge 1.21.1; the Java API is available on the other targets. See the [overview](overview#loader-and-script-support) for page-script availability.
 
 ## Three Page Hosts
 
@@ -76,24 +75,38 @@ public boolean resetViewportZoom()
 
 ## Lifecycle
 
-```text
-new KltytonScreen(path)      // only stores the path, doesn't read the HTML
-  -> setScreen -> init()      // creates the Document, parses HTML/CSS/JS
-  -> DOMContentLoaded -> load
-  -> render() / input / resize()
-  -> onClose()                // dispatches unload to body first, then removes the Document
+```mermaid
+flowchart TD
+  A[Create KltytonScreen or KltytonContainerScreen] --> B[First init creates the Document]
+  B --> C[Parse the page and dispatch DOMContentLoaded and load]
+  C --> D[Render, input, and resize]
+  D --> E{Is the linked Document still active on the next init?}
+  E -->|Yes| F[Reuse the Document and update its viewport]
+  E -->|No| B
+  F --> D
+  D --> G[Close and remove the Screen]
+  G --> H[Dispatch unload, remove the Document, and clear references]
 ```
+
+`KltytonContainerScreen` also reuses its `SlotDataBinder` with the Document and resynchronizes container slot positions after each init. Closing and removing the Screen cleans up the Document and binder; the next open creates them again.
 
 A few easy traps:
 
-- `init()` may be called repeatedly (e.g. on resize), and each call rebuilds the Document;
+- `init()` may be called repeatedly (e.g. on resize); while the linked Document is active, KUI reuses it and updates the viewport, preserving page state across resizes;
 - `Document.refresh()` keeps the Document itself but rebuilds the DOM and re-runs scripts. After a refresh, all old Element references and event listeners become invalid — use `document.getRefreshGeneration()` / `isCurrentGeneration(gen)` to check the generation;
 - When overriding `init()` / `onClose()` / `removed()`, you must call super, otherwise the Document is never created or never cleaned up;
 - Don't call `Document.create(same path)` again in a subclass — that leaves two Documents alive at once, doubling both rendering and input.
 
 ## Page Meta Configuration
 
-These two meta tags are KUI's page-level configuration, **shared by all hosts** (Screen, Overlay, Container, and WorldWindow all read them). The full explanation is maintained only here and is not repeated in other documents.
+These meta tags configure a page across all hosts: Screen, Overlay, Container, and WorldWindow.
+
+| Setting | Default | Usage |
+| --- | --- | --- |
+| `kui-preload` | Prepare the template on first open | `<meta name="kui-preload">` prepares that page during resource loading; `content="false"` disables preloading |
+| `kui-hyphen-break` | Allow line breaks after `-` and `‐` | `<meta name="kui-hyphen-break" content="false">` keeps hyphenated identifiers together; whitespace, CJK, and break-all rules remain available |
+
+Preloading reuses template blueprints, CSS, fonts, and compiled scripts, and submits static local images to the existing asynchronous image cache. Page DOM, events, and initialization scripts are created or executed when the page opens. Resource reload invalidates the current cache generation; remote images and SVGs that depend on layout dimensions remain on demand.
 
 ### kui-viewport: Logical Viewport
 
@@ -126,7 +139,7 @@ All modes support zoom parameters:
 | `zoom-step` | 0.1 | Zoom step per increment |
 | `user-scalable` | true | Whether shortcut-key zoom is allowed |
 
-When zooming is allowed: Ctrl+wheel and Ctrl+`+`/`-` zoom, Ctrl+`0` resets. The zoom value is stored per page path in `config/kltytonui/viewport-zoom.properties`, so reopening the page remembers the last value.
+When zooming is allowed: Ctrl+wheel and Ctrl+`+`/`-` zoom, Ctrl+`0` resets. While zooming, the bottom-right HUD shows the current percentage and a Reset button. The zoom value is stored per page path in `config/kltytonui/viewport-zoom.properties`, so reopening the page remembers the last value.
 
 Setting `user-scalable` to `false` disables that shortcut set — Ctrl+wheel falls back to a plain scroll, and Java's `document.setViewportZoom(...)` is unaffected. See [Browser-like Features](browser-features#page-zoom) for details.
 
@@ -178,14 +191,6 @@ if (Minecraft.getInstance().screen instanceof KltytonScreen screen) {
 }
 ```
 
-KubeJS client script:
-
-```javascript
-const document = KltytonUI.getCurrentScreenDocument();
-```
-
-Both only have a value when the current Screen really is an KltytonScreen. What `KltytonUI.screen(path)` opens is a container Screen, which returns null — don't use path matching as a substitute for this method.
-
 ## When You Need a Container
 
 KltytonScreen has no Menu and no real slots. If the page needs to operate the player inventory, block entity containers, or server data, go through the container entry point:
@@ -198,7 +203,7 @@ Or from a client script, `KltytonUI.screen("screens/inventory.html")`. See the [
 
 ## Resource reload
 
-Triggering **Reload Resources** rescans resources and refreshes all normal Documents: scripts re-run and the DOM is rebuilt. So top-level JS variables, dynamically added nodes, and input field values are all lost — data that must survive should live on the Java/KubeJS side and be written back to the page on `load`. Its key action is unbound by default and can be bound in Minecraft's Controls settings. `document.setReloadPersistent(true)` lets a standalone Overlay skip the reload, but don't do this for Screen-bound Documents — it easily leaves page code and resource versions out of sync.
+Triggering **Reload Resources** rescans resources and refreshes all normal Documents: scripts re-run and the DOM is rebuilt. So top-level JS variables, dynamically added nodes, and input field values are all lost — data that must survive should live on the Java side and be written back to the page on `load`. Its key action is unbound by default and can be bound in Minecraft's Controls settings. `document.setReloadPersistent(true)` lets a standalone Overlay skip the reload, but don't do this for Screen-bound Documents — it easily leaves page code and resource versions out of sync.
 
 ## FAQ
 

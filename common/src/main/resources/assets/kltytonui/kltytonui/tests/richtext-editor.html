@@ -322,7 +322,7 @@ DocumentModel.prototype.removeRange = function(start, end){
   };
 DocumentModel.prototype.insertText = function(str){
     if (!str) return;
-    str = '' + str;   // Rhino 下 e.data 是 Java String,length/slice 等 JS 方法不可用;转 JS 字符串
+    str = '' + str;   // Normalize event data before inserting text.
     var marks = this.activeMarks();
     var { start, end } = this.range();
     var at = this.removeRange(start, end);

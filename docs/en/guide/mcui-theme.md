@@ -7,4 +7,4 @@ McUI is a standalone pure-CSS theme following the [built-in theme contract](../.
 
 The entry point is kltytonui/theme/mcui/mcui.css, with local fonts. The theme does not require Vue or a browser engine. The stylesheet is MPL-2.0; the bundled McUI fonts retain their MIT attribution in the same directory.
 
-Open kltytonui/theme/mcui/example.html in game for the seven-page pure-CSS showcase. Pages need only the stylesheet above.
+The repository's `theme/mcui/example.html` shows the seven-page pure-CSS showcase. Copy it into your own resources to preview it in game; the distribution JAR does not include example pages.

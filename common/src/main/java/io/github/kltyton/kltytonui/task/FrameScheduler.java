@@ -1,6 +1,8 @@
 package io.github.kltyton.kltytonui.task;
 
 import io.github.kltyton.kltytonui.ui.ToastManager;
+import io.github.kltyton.kltytonui.ui.ZoomHudManager;
+import io.github.kltyton.kltytonui.world.WorldWindow;
 import io.github.kltyton.kltytonui.resource.async.image.ImageAsyncHandler;
 import io.github.kltyton.kltytonui.resource.async.style.StyleAsyncHandler;
 import io.github.kltyton.kltytonui.init.Document;
@@ -21,6 +23,8 @@ public final class FrameScheduler {
 
     public static void tick() {
         ToastManager.tick();
+        ZoomHudManager.tick();
+        WorldWindow.tick();
         Window.window.dispatchIntersectionObserverCallbacks();
 
         // 1) Drain async apply tasks (style/image/audio decode -> apply)

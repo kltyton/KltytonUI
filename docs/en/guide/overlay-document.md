@@ -2,7 +2,6 @@
 
 An Overlay is a Document not attached to any Minecraft Screen: `KltytonUI.createDocument(path)` creates one and adds it to a global list, and the client renders it automatically during the GUI/HUD draw phase. It suits HUDs, Toasts, notification bars, floating panels, fullscreen masks, and dev tools. It does not open a new Screen and has no container slots — for slots, see the [container documentation](container).
 
-The KubeJS examples in this guide apply to Forge 1.20.1 and NeoForge 1.21.1; the Java API is available on the other targets. See the [overview](overview#loader-and-script-support).
 
 ## Differences from KltytonScreen
 
@@ -51,7 +50,7 @@ public static void close() {
 }
 ```
 
-Creation and modification must happen on the client thread; in network callbacks, wrap with `Minecraft.getInstance().execute(...)` first. KubeJS client scripts use the same set of APIs (`KltytonUI.createDocument(...)`), while a page's own script uses the in-page `document` directly.
+Creation and modification must happen on the client thread; in network callbacks, wrap with `Minecraft.getInstance().execute(...)` first. Page scripts can use the in-page `document`.
 
 ## API
 
@@ -88,7 +87,7 @@ There is also `setManuallyRendered(true)`: it removes the Document from global d
 - **Parsing on creation**: `createDocument` immediately parses the HTML/CSS/JS, computes layout, runs scripts, and dispatches DOMContentLoaded/load. The cost is not small — create once on open, don't create every frame.
 - **Modification**: after DOM changes the framework does incremental updates. Do batch modifications in one go; don't spread them across many frames.
 - **Removal**: `document.remove()` cleans up focus, hover, Observers, and other state. Unlike Screens, it does **not** dispatch unload to the body — invoke any cleanup logic explicitly yourself.
-- **Reload**: **Reload Resources** refreshes all normal Overlays; the DOM and JS state are rebuilt and old Element references become invalid. Its key action is unbound by default. Keep the state you want to preserve on the Java/KubeJS side and write it back in `load`.
+- **Reload**: **Reload Resources** refreshes all normal Overlays; the DOM and JS state are rebuilt and old Element references become invalid. Its key action is unbound by default. Keep the state you want to preserve on the Java side and write it back in `load`.
 
 ## Layering: Between and Within Documents
 

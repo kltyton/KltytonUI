@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -88,6 +89,10 @@ public:
     void focus(bool focused);
     void mouse(int kind, int virtualKeys, int mouseData, int x, int y);
     void eval(const std::wstring& script);
+    void enableBridge(bool enabled);
+    // Triples: native navigation generation, actual WebView2 Source, JSON payload.
+    std::vector<std::wstring> drainMessages();
+    bool postMessage(uint64_t generation, const std::wstring& json);
     /** Force one capture even when auto capture is off. */
     void requestCapture();
 
@@ -116,6 +121,7 @@ private:
     void noteStatus(const std::wstring& message);
     void setError(const std::wstring& message);
     void threadMain();
+    bool enableVisualCapture();
     void post(std::function<void()> fn);
     void drainCommands();
 
@@ -126,9 +132,7 @@ private:
     void startDecodeThread();
     void stopDecodeThread();
     void decodeThreadMain();
-    void enqueueDecode(Microsoft::WRL::ComPtr<IStream> stream, uint64_t captureId);
-    /** Sends the newest coalesced pointer position, if one is pending. */
-    void flushPendingMouseMove();
+    void enqueueDecode(Microsoft::WRL::ComPtr<IStream> stream, uint64_t sourceGeneration);
     bool createWindow(HINSTANCE instance);
     bool createEnvironment();
     HRESULT attachController(ICoreWebView2CompositionController* controller);
@@ -136,11 +140,13 @@ private:
     int resolveFrameFormat();
     /** Starts the raw composition stream if it is not running yet. */
     bool ensureStream();
-    /** Hands one decoded canvas to the update channel. */
-    bool publishCanvas(const uint8_t* pixels, int width, int height);
+    /** Hands one decoded canvas to the update channel; BGRA sources are flipped on the way in. */
+    bool publishCanvas(const uint8_t* pixels, int width, int height, bool bgraSource,
+                       uint64_t sourceGeneration);
     /** Publishes a frame handed over by the stream callback; safe from any thread. */
-    void publishRaw(int width, int height, const uint8_t* rgba, size_t bytes);
-    void decodeAndPublish(IStream* stream);
+    void publishRaw(int width, int height, const uint8_t* rgba, size_t bytes,
+                    uint64_t sourceGeneration, bool visualCapture, bool blank);
+    void decodeAndPublish(IStream* stream, uint64_t sourceGeneration);
     void releaseAll();
 
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -155,7 +161,7 @@ private:
 
     // thread plumbing
     std::thread thread_;
-    DWORD threadId_ = 0;
+    std::atomic<DWORD> threadId_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> ready_{false};
     HANDLE readyEvent_ = nullptr;
@@ -165,10 +171,17 @@ private:
     struct Command {
         std::function<void()> fn;
         uint64_t queuedAt;
+        bool mouseMove = false;
     };
 
     std::mutex commandMutex_;
     std::deque<Command> commands_;
+
+    std::atomic<bool> bridgeEnabled_{false};
+    std::atomic<uint64_t> bridgeGeneration_{0};
+    std::atomic<int> bridgePosts_{0};
+    std::mutex bridgeMutex_;
+    std::deque<std::vector<std::wstring>> bridgeMessages_;
 
     // decode worker
     std::thread decodeThread_;
@@ -179,15 +192,6 @@ private:
     /** Decodes queued but not finished; also bounds how far capture may run ahead. */
     std::atomic<int> pendingDecodes_{0};
 
-    /**
-     * Pointer moves are coalesced to the newest position: Chromium only needs where the
-     * cursor is now, and forwarding every intermediate sample is what made dragging feel
-     * laggy. Buttons, wheel and leave keep their order and are never coalesced.
-     */
-    std::atomic<bool> pendingMouseMove_{false};
-    std::atomic<int> pendingMouseX_{0};
-    std::atomic<int> pendingMouseY_{0};
-    std::atomic<int> pendingMouseKeys_{0};
     std::atomic<int> coalescedMouseMoves_{0};
 
     // window / COM, touched only from the host thread
@@ -203,18 +207,31 @@ private:
     Microsoft::WRL::ComPtr<IDCompositionDevice> dcompDevice_;
     Microsoft::WRL::ComPtr<IDCompositionTarget> dcompTarget_;
     Microsoft::WRL::ComPtr<IDCompositionVisual> dcompVisual_;
+    struct VisualComposition;
+    std::unique_ptr<VisualComposition> visualComposition_;
     std::wstring pendingUrl_;
 
     // capture state, host thread only
-    /**
-     * Captures allowed in flight.
-     *
-     * <p>{@code CapturePreview} costs a fixed ~20-30 ms per call no matter how small the
-     * raster is, most of it waiting on the browser process, so a second request is issued
-     * while the first is still out. More than two only queues work the browser cannot reach
-     * any sooner.</p>
-     */
-    static constexpr int kMaxCapturesInFlight = 4;
+    /** One preview capture per view; the process-wide scheduler allows two concurrent captures. */
+    static constexpr int kMaxCapturesInFlight = 1;
+    void wakeCapture(bool interactive = false);
+    void updateCaptureBounds();
+    int captureInterval(uint64_t now) const;
+    double requestedZoom_ = 1.0;
+    double appliedZoom_ = 0.0;
+    bool reducedRaster_ = false;
+    bool manualCapture_ = false;
+    bool refreshPending_ = true;
+    bool forceCapture_ = false;
+    std::atomic<bool> retryCapture_{false};
+    bool budgetRegistered_ = false;
+    uint64_t activeUntil_ = 0;
+    uint64_t interactiveUntil_ = 0;
+    uint64_t reducedSince_ = 0;
+    std::atomic<uint64_t> unchangedSince_{0};
+    std::atomic<int> effectiveIntervalMs_{33};
+    std::atomic<int> captureMode_{0};
+    std::atomic<int> budgetWaits_{0};
     /** Decodes allowed to queue behind the worker; past this a capture is not worth taking. */
     static constexpr int kMaxPendingDecodes = 4;
     int capturesInFlight_ = 0;
@@ -223,12 +240,15 @@ private:
     uint64_t publishedCaptureSequence_ = 0;
     ULONGLONG lastCaptureTick_ = 0;
     // 0 = PNG, 1 = JPEG, 2 = auto, 3 = composition stream only.
-    int frameFormat_ = 2;
+    std::atomic<int> frameFormat_{2};
+    std::atomic<uint64_t> frameGeneration_{1};
     FrameStream stream_;
-    bool streamActive_ = false;
+    std::atomic<bool> streamActive_{false};
+    std::atomic<bool> streamReady_{false};
+    std::shared_ptr<std::atomic<uint64_t>> streamGeneration_;
     bool streamUnavailable_ = false;
     std::atomic<bool> streamAbandon_{false};
-    bool autoUsesFast_ = false;
+    std::atomic<bool> autoUsesFast_{false};
     std::atomic<long long> lastPublishTick_{0};
     ULONGLONG decisionWindowStart_ = 0;
     std::atomic<int> decisionWindowPublishes_{0};
@@ -236,7 +256,7 @@ private:
     uint64_t loopIterations_ = 0;
     uint64_t loopIterationsAtWindowStart_ = 0;
     ULONGLONG rateWindowStart_ = 0;
-    int rateWindowFrames_ = 0;
+    std::atomic<int> rateWindowFrames_{0};
 
     // frame state, shared with the reader through the section
     FrameChannel channel_;
@@ -244,6 +264,9 @@ private:
     std::mutex publishMutex_;
     std::vector<uint8_t> payload_;      // scratch, host thread only
     std::vector<uint8_t> lastPayload_;  // encoded payload of the last published frame
+    uint64_t lastPayloadGeneration_ = 0; // decode thread only
+    /** Decoded canvas reused by the decode thread; never shared with the host thread. */
+    std::vector<uint8_t> decodedPixels_;
     std::vector<void*> channelViews_;   // reader mappings, unmapped at teardown
     std::mutex channelViewMutex_;
 

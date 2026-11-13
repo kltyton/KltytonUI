@@ -33,10 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * offscreen compositing group that AUI switched to (filter/opacity/mask/blend)
  * would silently receive nothing and its composite would draw an empty layer.</p>
  *
- * <p>Stencil is deliberately absent from the key: vanilla 26.1 pipelines cannot
- * carry it (NeoForge patches stencil into {@code DepthStencilState}), and the
- * Fabric backend reports stencil as unavailable, so masks degrade to the
- * scissor path there.</p>
+ * <p>Vanilla 26.1 does not expose hardware stencil state. Shaped masks use a
+ * separate color-and-depth clip-layer pipeline.</p>
  */
 public final class PipelineCache {
     private static final Map<Key, RenderPipeline> PIPELINES = new ConcurrentHashMap<>();

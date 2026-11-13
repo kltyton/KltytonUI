@@ -14,6 +14,21 @@ import io.github.kltyton.kltytonui.init.Node;
 public interface DocumentExpander {
     void apply(Document document);
 
+    /** Returns false only when expansion is known not to change DOM or styling inputs. */
+    default boolean applyAndReportChanges(Document document) {
+        apply(document);
+        return true;
+    }
+
+    /**
+     * Allows a loader to opt into batched setInnerHTML replacement when its
+     * child rules preserve sequential validation and restoration semantics.
+     * Unknown implementations keep the legacy per-child insertion path.
+     */
+    default boolean supportsInnerHtmlBatch(Document document, Node parent) {
+        return false;
+    }
+
     /**
      * Validates loader-specific DOM hierarchy before a connected runtime insertion.
      * Implementations may replace incompatible siblings before the insertion.

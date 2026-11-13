@@ -17,7 +17,7 @@ Ore 是框架自带的纯 CSS 主题：MC 风格像素边框、深色石材表�
 - 默认深色画布背景、16px 字号、box-sizing 传播，但不会帮你铺满屏幕——要满屏自己加 `min-height:100vh`；
 - 许可证 MPL-2.0，随模组分发时保留主题目录里的 `license.txt`。
 
-展示页 `kltytonui/theme/ore/example.html` 可以直接用 `new KltytonScreen(...)` 打开，七个页面把所有组件都演示了一遍——**先看它再看本文的类名清单**，比读表格直观。
+源码仓库中的 `theme/ore/example.html` 展示了这些组件；需要在游戏内预览时，可将示例复制到自己的资源目录。发行 JAR 不包含示例页面。
 
 ## 设计 Token
 

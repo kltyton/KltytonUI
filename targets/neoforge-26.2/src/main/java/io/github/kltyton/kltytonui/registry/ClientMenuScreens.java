@@ -28,7 +28,7 @@ public class ClientMenuScreens {
     private static AbstractContainerScreen<KltytonContainerMenu> createScreen(KltytonContainerMenu menu, Inventory inventory, Component title) {
         try {
             Class<?> screenClass = Class.forName(CONTAINER_SCREEN_CLASS);
-            Constructor<?> constructor = screenClass.getConstructor(KltytonContainerMenu.class, Inventory.class, Component.class);
+            Constructor<?> constructor = screenClass.getConstructor(net.minecraft.world.inventory.AbstractContainerMenu.class, Inventory.class, Component.class);
             return (AbstractContainerScreen<KltytonContainerMenu>) constructor.newInstance(menu, inventory, title);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Failed to create Kltyton container screen", exception);

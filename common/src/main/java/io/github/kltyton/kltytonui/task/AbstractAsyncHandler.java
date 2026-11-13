@@ -75,10 +75,19 @@ public abstract class AbstractAsyncHandler<TApplyTask> {
             try {
                 applyOnMainThread(task, currentGeneration());
             } catch (RuntimeException exception) {
+                try {
+                    onApplyQueueDrained();
+                } catch (RuntimeException pendingFailure) {
+                    exception.addSuppressed(pendingFailure);
+                }
                 KltytonUI.LOGGER.error("[KUI Async] apply task failed handler={} processed={}", id, processed, exception);
                 throw exception;
             }
         }
+        if (processed > 0) onApplyQueueDrained();
+    }
+
+    protected void onApplyQueueDrained() {
     }
 
     public final void clearAndBumpGeneration() {

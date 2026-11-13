@@ -393,7 +393,7 @@ public class WorldWindow {
         }
     }
 
-    /** Rhino/KubeJS-friendly overload accepting {@code auto}, {@code full}, {@code reduced} or {@code minimal}. */
+    /** String overload accepting {@code auto}, {@code full}, {@code reduced} or {@code minimal}. */
     public void setDisplayPrecision(String displayPrecision) {
         setDisplayPrecision(WorldWindowDisplayPrecision.parse(displayPrecision));
     }
@@ -632,6 +632,17 @@ public class WorldWindow {
         for (WorldWindow window : new ArrayList<>(windows)) {
             removeWindow(window);
         }
+    }
+
+    /**
+     * Drops world windows once the client no longer has a level (disconnect,
+     * title screen). World windows belong to the current save; keeping them
+     * would leave stale documents bound to a level that no longer exists.
+     */
+    public static void tick() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || minecraft.level != null) return;
+        if (!windows.isEmpty()) clear();
     }
 
     /**

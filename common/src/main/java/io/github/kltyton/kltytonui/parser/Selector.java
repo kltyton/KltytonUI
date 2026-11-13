@@ -190,9 +190,7 @@ public class Selector {
                 case "read-write" -> !e.hasAttribute("readonly") && e.isWillValidate();
                 case "placeholder-shown" -> e.hasAttribute("placeholder") && e.getValue().isEmpty();
                 case "empty" -> e.children.isEmpty();
-                case "checked" -> e.getAttributes().containsKey("checked")
-                        || "OPTION".equalsIgnoreCase(e.tagName)
-                        || e.getAttributes().containsKey("selected");
+                case "checked" -> isChecked(e);
                 case "root" -> e.parentElement == null;
                 case "first-child", "last-child", "nth-child", "nth-last-child", "only-child",
                      "first-of-type", "last-of-type", "only-of-type", "nth-of-type", "nth-last-of-type" -> e.parentElement != null;
@@ -266,7 +264,7 @@ public class Selector {
             return new SpecificityParts(0, 1, 0);
         }
 
-        private boolean isChecked(Element e) {
+        private static boolean isChecked(Element e) {
             if ("INPUT".equalsIgnoreCase(e.tagName)) {
                 String type = e.getAttribute("type");
                 if ("checkbox".equalsIgnoreCase(type) || "radio".equalsIgnoreCase(type)) {
@@ -280,13 +278,7 @@ public class Selector {
             }
 
             if ("OPTION".equalsIgnoreCase(e.tagName)) {
-                if (e.getAttributes().containsKey("selected")) return true;
-                Element parent = e.parentElement;
-                if (parent != null && "SELECT".equalsIgnoreCase(parent.tagName)) {
-                    String pv = parent.getAttribute("value");
-                    String ov = e.getAttribute("value");
-                    return pv != null && pv.equals(ov);
-                }
+                return e.isSelected();
             }
 
             return false;
@@ -295,15 +287,24 @@ public class Selector {
         private boolean isSiblingIndex(Element e, int target) {
             if (e.parentElement == null) return false;
             List<Element> siblings = e.parentElement.children;
-            int idx = siblings.indexOf(e);
-            return target == -1 ? idx == siblings.size() - 1 : idx == target;
+            if (siblings.isEmpty()) return false;
+            return target == -1 ? siblings.get(siblings.size() - 1) == e : target == 0 && siblings.get(0) == e;
         }
 
         private boolean isTypeSiblingIndex(Element e, int target) {
             if (e.parentElement == null) return false;
-            List<Element> siblings = sameTypeSiblings(e);
-            int index = siblings.indexOf(e);
-            return target == -1 ? index == siblings.size() - 1 : index == target;
+            List<Element> siblings = e.parentElement.children;
+            if (target == 0) {
+                for (Element sibling : siblings) {
+                    if (sibling.tagName.equalsIgnoreCase(e.tagName)) return sibling == e;
+                }
+            } else if (target == -1) {
+                for (int i = siblings.size() - 1; i >= 0; i--) {
+                    Element sibling = siblings.get(i);
+                    if (sibling.tagName.equalsIgnoreCase(e.tagName)) return sibling == e;
+                }
+            }
+            return false;
         }
 
         private int countSameTypeSiblings(Element e) {
@@ -378,6 +379,7 @@ public class Selector {
         private final Map<String, List<IndexedRule>> byScrollbarPseudo = new HashMap<>();
         private final Map<String, List<PseudoDependency>> pseudoDependencies = new HashMap<>();
         private boolean hasRelationalSelectors;
+        private final Map<String, StyleAttributeRecalcScope> attributeRecalcScopes = new HashMap<>();
         private final Set<Component> topologyDependentComponents = new HashSet<>();
         private final List<IndexedRule> always = new ArrayList<>();
 
@@ -415,6 +417,7 @@ public class Selector {
 
         private void addRule(IndexedRule rule) {
             List<Component> components = rule.selector.components;
+            recordAttributeRecalcScopes(rule.selector, StyleAttributeRecalcScope.SELF);
             recordTopologyDependencies(rule.selector);
             recordPseudoDependencies(rule.selector, List.of(), PseudoRecalcScope.SELF);
             Component last = components.get(components.size() - 1);
@@ -458,6 +461,99 @@ public class Selector {
             }
 
             always.add(rule);
+        }
+
+        public enum StyleAttributeRecalcScope {
+            NONE,
+            SELF,
+            SUBTREE,
+            PARENT_SUBTREE,
+            DOCUMENT
+        }
+
+        public StyleAttributeRecalcScope attributeRecalcScope(String name) {
+            return attributeRecalcScopes.getOrDefault(name.toLowerCase(Locale.ROOT), StyleAttributeRecalcScope.NONE);
+        }
+
+        private void recordAttributeRecalcScopes(
+                CompiledSelector selector,
+                StyleAttributeRecalcScope subjectScope
+        ) {
+            int last = selector.components.size() - 1;
+            for (int i = 0; i <= last; i++) {
+                Component component = selector.components.get(i);
+                StyleAttributeRecalcScope componentScope = subjectScope == StyleAttributeRecalcScope.DOCUMENT
+                        ? subjectScope
+                        : i == last
+                        ? subjectScope
+                        : isSiblingCombinator(selector.combinators.get(i))
+                                ? StyleAttributeRecalcScope.PARENT_SUBTREE
+                                : StyleAttributeRecalcScope.SUBTREE;
+                recordComponentAttributes(component, componentScope);
+                if (component.pseudos == null) continue;
+                for (Pseudo pseudo : component.pseudos) {
+                    if (pseudo.selectors.isEmpty()) continue;
+                    if ("has".equals(pseudo.name)) {
+                        for (CompiledSelector nested : pseudo.selectors) {
+                            recordAttributeRecalcScopes(nested, StyleAttributeRecalcScope.DOCUMENT);
+                        }
+                        continue;
+                    }
+                    for (CompiledSelector nested : pseudo.selectors) {
+                        recordAttributeRecalcScopes(nested, componentScope);
+                    }
+                }
+            }
+        }
+
+        private void recordComponentAttributes(Component component, StyleAttributeRecalcScope scope) {
+            if (component.id != null) recordAttributeScope("id", scope);
+            if (component.classes != null && !component.classes.isEmpty()) recordAttributeScope("class", scope);
+            if (component.attributeSelectors != null) {
+                for (AttributeSelector attribute : component.attributeSelectors) recordAttributeScope(attribute.name, scope);
+            }
+            if (component.pseudos == null) return;
+            for (Pseudo pseudo : component.pseudos) {
+                switch (pseudo.name) {
+                    case "disabled", "enabled" -> recordAttributeScope("disabled", scope);
+                    case "required", "optional" -> recordAttributeScope("required", scope);
+                    case "read-only", "read-write" -> {
+                        recordAttributeScope("readonly", scope);
+                        recordAttributeScope("disabled", scope);
+                        recordAttributeScope("type", scope);
+                    }
+                    case "placeholder-shown" -> {
+                        recordAttributeScope("placeholder", scope);
+                        recordAttributeScope("value", scope);
+                    }
+                    case "checked" -> {
+                        recordAttributeScope("checked", scope);
+                        recordAttributeScope("selected", scope);
+                        recordAttributeScope("type", scope);
+                    }
+                    case "valid", "invalid", "in-range", "out-of-range" -> {
+                        for (String name : List.of("disabled", "readonly", "type", "required", "multiple",
+                                "value", "min", "max", "step", "pattern", "minlength", "maxlength", "name", "form")) {
+                            recordAttributeScope(name, scope);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void recordAttributeScope(String name, StyleAttributeRecalcScope scope) {
+            attributeRecalcScopes.merge(name.toLowerCase(Locale.ROOT), scope, Index::broaderStyleAttributeScope);
+        }
+
+        private static boolean isSiblingCombinator(Combinator combinator) {
+            return combinator == Combinator.ADJACENT_SIBLING || combinator == Combinator.GENERAL_SIBLING;
+        }
+
+        private static StyleAttributeRecalcScope broaderStyleAttributeScope(
+                StyleAttributeRecalcScope current,
+                StyleAttributeRecalcScope candidate
+        ) {
+            return current.ordinal() >= candidate.ordinal() ? current : candidate;
         }
 
         public enum PseudoRecalcScope { SELF, SUBTREE, PARENT_SUBTREE, DOCUMENT }

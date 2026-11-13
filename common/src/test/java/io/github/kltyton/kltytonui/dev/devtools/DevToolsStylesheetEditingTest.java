@@ -182,6 +182,44 @@ class DevToolsStylesheetEditingTest {
         }
     }
 
+    @Test
+    void reapplyingStylesRefreshesRootVariablesAndDescendantStyles() {
+        Document document = styledDocument();
+        try {
+            Element target = document.querySelector("#target");
+            Element alias = document.createElement("div");
+            alias.setAttribute("style", "--alias: var(--reload-accent);");
+            target.appendChild(alias);
+            Element aliasConsumer = document.createElement("div");
+            aliasConsumer.setAttribute("style", "background-color: var(--alias);");
+            alias.appendChild(aliasConsumer);
+            Element override = document.createElement("div");
+            override.setAttribute("style", "--reload-accent: green; background-color: var(--reload-accent);");
+            target.appendChild(override);
+            CSS.readCSS(":root { --reload-accent: red; } #target { background-color: var(--reload-accent); }",
+                    document.CSSCache, "styles/reload.css");
+            document.rebuildSelectorIndex();
+            document.reapplyStylesFromCache();
+            document.commitStyleRecalc();
+            assertEquals("red", document.documentElement.getComputedStyle().getCustomProperty("--reload-accent"));
+            assertEquals("red", target.getComputedStyle().backgroundColor);
+            assertEquals("red", aliasConsumer.getComputedStyle().backgroundColor);
+            assertEquals("green", override.getComputedStyle().backgroundColor);
+
+            CSS.readCSS(":root { --reload-accent: blue; } #target { background-color: var(--reload-accent); }",
+                    document.CSSCache, "styles/reload.css");
+            document.rebuildSelectorIndex();
+            document.reapplyStylesFromCache();
+            document.commitStyleRecalc();
+            assertEquals("blue", document.documentElement.getComputedStyle().getCustomProperty("--reload-accent"));
+            assertEquals("blue", target.getComputedStyle().backgroundColor);
+            assertEquals("blue", aliasConsumer.getComputedStyle().backgroundColor);
+            assertEquals("green", override.getComputedStyle().backgroundColor);
+        } finally {
+            document.remove();
+        }
+    }
+
     private static Document styledDocument() {
         String path = "test://stylesheet-edit-" + UUID.randomUUID();
         HTML.putTemple(path, "<html><body><div id=\"target\" class=\"card\"></div></body></html>");

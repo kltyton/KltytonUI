@@ -17,8 +17,16 @@ public final class LayoutMeasureCache {
     public static final int FLEX_ASSIGNED_MAIN_SIZES = 6;
     public static final int SIZE_NATURAL_CONSTRAINED = 7;
     public static final int LAYOUT_GRID = 8;
+    public static final int LAYOUT_TABLE = 9;
 
     private static final ThreadLocal<State> STATE = new ThreadLocal<>();
+    private static final ThreadLocal<Object> CONTEXT = new ThreadLocal<>();
+
+    static Object setContext(Object context) {
+        Object previous = CONTEXT.get();
+        if (context == null) CONTEXT.remove(); else CONTEXT.set(context);
+        return previous;
+    }
 
     private LayoutMeasureCache() {
     }
@@ -44,12 +52,13 @@ public final class LayoutMeasureCache {
     }
 
     public static Size getSize(int mode, Element element, double availableWidth, double availableHeight, boolean natural) {
+        if (Size.isMinContentMeasurementContext()) mode += 100;
         State state = STATE.get();
         if (state == null || state.depth <= 0 || element == null) return null;
-        if (mode == SIZE_NATURAL && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
+        if (CONTEXT.get() == null && mode == SIZE_NATURAL && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
             return state.naturalSizes.get(state.probeKey(mode, element, availableWidth, availableHeight, natural, false));
         }
-        if (mode == CONTENT_FLEX && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
+        if (CONTEXT.get() == null && mode == CONTENT_FLEX && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
             if (natural) {
                 return state.naturalFlexContentSizes.get(
                         state.probeKey(mode, element, availableWidth, availableHeight, true, false));
@@ -60,13 +69,14 @@ public final class LayoutMeasureCache {
     }
 
     public static void putSize(int mode, Element element, double availableWidth, double availableHeight, boolean natural, Size size) {
+        if (Size.isMinContentMeasurementContext()) mode += 100;
         State state = STATE.get();
         if (state == null || state.depth <= 0 || element == null || size == null) return;
-        if (mode == SIZE_NATURAL && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
+        if (CONTEXT.get() == null && mode == SIZE_NATURAL && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
             state.naturalSizes.put(new Key(mode, element, availableWidth, availableHeight, natural, false), size);
             return;
         }
-        if (mode == CONTENT_FLEX && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
+        if (CONTEXT.get() == null && mode == CONTENT_FLEX && Double.isNaN(availableWidth) && Double.isNaN(availableHeight)) {
             if (natural) {
                 state.naturalFlexContentSizes.put(
                         new Key(mode, element, availableWidth, availableHeight, true, false), size);
@@ -79,12 +89,14 @@ public final class LayoutMeasureCache {
     }
 
     public static Object getObject(int mode, Element element, double availableWidth, double availableHeight, boolean natural) {
+        if (Size.isMinContentMeasurementContext()) mode += 100;
         State state = STATE.get();
         if (state == null || state.depth <= 0 || element == null) return null;
         return state.objects.get(state.probeKey(mode, element, availableWidth, availableHeight, natural, true));
     }
 
     public static void putObject(int mode, Element element, double availableWidth, double availableHeight, boolean natural, Object value) {
+        if (Size.isMinContentMeasurementContext()) mode += 100;
         State state = STATE.get();
         if (state == null || state.depth <= 0 || element == null || value == null) return;
         state.objects.put(new Key(mode, element, availableWidth, availableHeight, natural, true), value);
@@ -138,6 +150,7 @@ public final class LayoutMeasureCache {
 
     private static final class Key {
         private int mode;
+        private Object context;
         private Element element;
         private long availableWidth;
         private long availableHeight;
@@ -163,6 +176,7 @@ public final class LayoutMeasureCache {
         private void set(int mode, Element element, double availableWidth, double availableHeight,
                          boolean natural, boolean includeTextDependency) {
             this.mode = mode;
+            this.context = CONTEXT.get();
             this.element = element;
             this.availableWidth = bits(availableWidth);
             this.availableHeight = bits(availableHeight);
@@ -170,7 +184,7 @@ public final class LayoutMeasureCache {
             this.dependency = element.getRenderer().layoutDependency();
             this.textDependency = includeTextDependency ? element.getRenderer().textDependency() : 0L;
             this.intrinsicOwnerContext = natural ? Size.getIntrinsicWidthOwnerContext() : null;
-            int result = mode;
+            int result = 31 * mode + System.identityHashCode(context);
             result = 31 * result + System.identityHashCode(element);
             result = 31 * result + Long.hashCode(this.availableWidth);
             result = 31 * result + Long.hashCode(this.availableHeight);
@@ -191,6 +205,7 @@ public final class LayoutMeasureCache {
             if (this == obj) return true;
             if (!(obj instanceof Key other)) return false;
             return mode == other.mode
+                    && context == other.context
                     && element == other.element
                     && availableWidth == other.availableWidth
                     && availableHeight == other.availableHeight

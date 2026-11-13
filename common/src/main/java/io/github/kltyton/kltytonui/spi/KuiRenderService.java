@@ -26,6 +26,13 @@ public interface KuiRenderService {
 
     void setProjectionMatrix(Matrix4f matrix);
 
+    default Matrix4f getModelViewMatrix() {
+        return new Matrix4f();
+    }
+
+    default void setModelViewMatrix(Matrix4f matrix) {
+    }
+
     Matrix4f getProjectionMatrix();
 
     void enableDepthTest();
@@ -89,6 +96,10 @@ public interface KuiRenderService {
     /** Binds the target's color attachment to a sampler unit for shader sampling. */
     void bindColorTexture(FboHandle target, int unit);
 
+    /** Presents a retained screen texture into the caller's logical document rectangle. */
+    default void drawOffscreenTexture(Matrix4f matrix, FboHandle target, float width, float height) {
+    }
+
     /**
      * Captures every loader-global state value that filter shader passes may
      * change, including sampler bindings and renderer-side caches such as
@@ -122,6 +133,12 @@ public interface KuiRenderService {
 
     /** Uploads a native-image region into the bound texture. */
     void uploadTextureRegion(Object texture, Object nativeImage, int x, int y, int width, int height, boolean linear);
+
+    /** Uploads tightly packed RGBA bytes while retaining the texture's CPU image; false uses the existing path. */
+    default boolean uploadTexturePixels(Object texture, java.nio.ByteBuffer pixels, int byteOffset,
+                                        int x, int y, int width, int height) {
+        return false;
+    }
 
     /**
      * Sets one ABGR-packed pixel of a native image (native image name differs
@@ -171,6 +188,21 @@ public interface KuiRenderService {
 
     /** Returns the loader's filter blur shader, or {@code null}. */
     Object getFilterBlurShader();
+
+    /** Returns the gradient background shader or pipeline for this loader. */
+    default Object getBackgroundShader() {
+        return null;
+    }
+
+    /** Opens the loader-specific render-state scope for background cache targets. */
+    default RenderStateScope pushBackgroundTarget(FboHandle target) {
+        return null;
+    }
+
+    /** Releases a background cache target while preserving the active framebuffer bindings. */
+    default void destroyBackgroundTarget(FboHandle target) {
+        destroyBuffers(target);
+    }
 
     /**
      * Returns the CSS compositing shader, or {@code null} when the backend
@@ -313,6 +345,30 @@ public interface KuiRenderService {
     /** Whether this loader can attach and draw against a stencil buffer. */
     default boolean supportsStencil() {
         return true;
+    }
+
+    /** Whether non-rectangular clips are represented by depth-preserving layers. */
+    default boolean usesClipLayers() {
+        return false;
+    }
+
+    /** Physical dimensions of the live attachment, including PIP overrides. */
+    default int clipTargetWidth(FboHandle target) {
+        return target.width;
+    }
+
+    default int clipTargetHeight(FboHandle target) {
+        return target.height;
+    }
+
+    /** Copies the live color and depth of {@code source} into a clip layer. */
+    default void copyClipSource(FboHandle source, FboHandle destination) {
+        throw new UnsupportedOperationException("Clip layers are not supported by this renderer");
+    }
+
+    /** Binds a clip layer so mask geometry can restore its color and depth. */
+    default RenderStateScope beginClipComposite(FboHandle content) {
+        throw new UnsupportedOperationException("Clip layers are not supported by this renderer");
     }
 
     /**

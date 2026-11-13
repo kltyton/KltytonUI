@@ -122,7 +122,7 @@ src/main/resources/assets/kltytonui/kltytonui/
 
 **EDIT META**：编辑 HTML head 里的 KUI meta（`kui-viewport`、`kui-mouse-events` 和 charset），非 KUI 的 meta 和 body 原样保留。资源包里的文件没有可写来源，此项禁用。各 meta 的含义见 [KltytonScreen 文档](kltytonui-screen#页面-meta-配置)。
 
-**REFERENCE**：一键生成引用代码并复制到剪贴板——图片给 CSS 背景和 `<img>` 两种写法，字体给 `@font-face` 注册 + `font-family` 使用，HTML 给 Screen / Overlay / WorldWindow / KubeJS 等各种打开方式。
+**REFERENCE**：一键生成引用代码并复制到剪贴板——图片给 CSS 背景和 `<img>` 两种写法，字体给 `@font-face` 注册 + `font-family` 使用，HTML 给 Screen / Overlay / WorldWindow 等各种打开方式。
 
 ## 排查
 

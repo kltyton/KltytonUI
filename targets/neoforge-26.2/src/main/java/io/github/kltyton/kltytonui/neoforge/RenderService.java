@@ -115,6 +115,8 @@ public final class RenderService implements KuiRenderService {
     private GpuBuffer meshVertexBuffer;
     private long meshVertexCapacity;
     private DynamicUniformStorage<FilterUniformData> filterUniformStorage;
+    private final io.github.kltyton.kltytonui.render.BackgroundUniforms backgroundUniforms = new io.github.kltyton.kltytonui.render.BackgroundUniforms();
+    private DynamicUniformStorage<BackgroundUniformData> backgroundUniformStorage;
     private final ByteBufferBuilder meshByteBuffer = new ByteBufferBuilder(786432);
     private int blitReadFbo;
     private int blitDrawFbo;
@@ -264,7 +266,7 @@ public final class RenderService implements KuiRenderService {
     public void clearDepthBuffer() {
         GpuTexture depthTexture = currentDepthTexture();
         if (depthTexture != null) {
-            RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 1.0);
+            RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 0.0);
         }
     }
 
@@ -345,6 +347,32 @@ public final class RenderService implements KuiRenderService {
         };
     }
 
+    @Override public Object getBackgroundShader() { return BackgroundPipelines.shader(); }
+
+    @Override
+    public RenderStateScope pushBackgroundTarget(FboHandle target) {
+        RenderTarget previousTarget = OutputTargets.currentTarget();
+        RenderStateScope state = pushFilterRenderState();
+        boolean previousStencil = stencilTest;
+        ScissorState scissor = RenderSystem.getScissorStateForRenderTypeDraws();
+        boolean clipped = scissor.enabled();
+        int x = scissor.x(), y = scissor.y(), w = scissor.width(), h = scissor.height();
+        var modelView = RenderSystem.getModelViewStack();
+        modelView.pushMatrix();
+        modelView.identity();
+        if (target != null) bindWrite(target, true);
+        disableScissorTest();
+        disableStencilTest();
+        return () -> {
+            OutputTargets.setCurrent(previousTarget);
+            modelView.popMatrix();
+            stencilTest = previousStencil;
+            if (clipped) RenderSystem.enableScissorForRenderTypeDraws(x, y, w, h);
+            else RenderSystem.disableScissorForRenderTypeDraws();
+            if (state != null) state.close();
+        };
+    }
+
     @Override
     public void setShaderUniformFloat(String name, float value) {
         switch (name) {
@@ -381,6 +409,7 @@ public final class RenderService implements KuiRenderService {
 
     @Override
     public void setShaderUniform4f(String name, float a, float b, float c, float d) {
+        if (backgroundUniforms.set(name, a, b, c, d)) return;
         switch (name) {
             case "ShadowColor" -> {
                 shadowColorR = a; shadowColorG = b; shadowColorB = c; shadowColorA = d;
@@ -594,6 +623,16 @@ public final class RenderService implements KuiRenderService {
      * the std140 {@code FilterParams} block and the Sampler0/Sampler1 views.
      */
     private void drawWithPass(RenderPipeline pipeline, MeshData meshData) {
+        boolean backgroundPipeline = currentShader == BackgroundPipelines.shader();
+        if (backgroundPipeline) {
+            MeshData.DrawState draw = meshData.drawState();
+            pipeline = BackgroundPipelines.adapt(PipelineCache.renderType(
+                    draw.format(), draw.primitiveTopology(), depthTest, depthFunc, depthMask, blend,
+                    srcRgb, dstRgb, srcAlpha, dstAlpha, cull, polygonOffset, biasScale, biasUnits,
+                    colorWriteMask,
+                    stencilTest, stencilFunc, stencilRef, stencilReadMask, stencilWriteMask,
+                    stencilSfail, stencilDpfail, stencilDppass).pipeline());
+        }
         boolean filterPipeline = pipeline == PipelineRegistry.getFilter()
                 || pipeline == PipelineRegistry.getFilterBlur()
                 || pipeline == PipelineRegistry.getFilterBlend();
@@ -621,7 +660,8 @@ public final class RenderService implements KuiRenderService {
 
         // The command encoder is occupied while a render pass is open;
         // upload the std140 block before creating the pass.
-        GpuBufferSlice uniforms = filterPipeline ? updateFilterUniforms() : null;
+        GpuBufferSlice uniforms = backgroundPipeline ? updateBackgroundUniforms()
+                : filterPipeline ? updateFilterUniforms() : null;
         GpuBufferSlice transforms = RenderSystem.getDynamicUniforms().writeTransform(
                 RenderSystem.getModelViewMatrixCopy(),
                 new Vector4f(1, 1, 1, 1), new Vector3f(), new Matrix4f());
@@ -633,7 +673,7 @@ public final class RenderService implements KuiRenderService {
                 depthView, OptionalDouble.empty());
         try {
             pass.setPipeline(pipeline);
-            if (uniforms != null) pass.setUniform("FilterParams", uniforms);
+            if (uniforms != null) pass.setUniform(backgroundPipeline ? "BackgroundParams" : "FilterParams", uniforms);
             if (scissor.enabled()) {
                 pass.enableScissor(scissor.x(), scissor.y(), scissor.width(), scissor.height());
             }
@@ -654,6 +694,30 @@ public final class RenderService implements KuiRenderService {
             pass.drawIndexed(state.indexCount(), 1, 0, 0, 0);
         } finally {
             pass.close();
+        }
+    }
+
+    private GpuBufferSlice updateBackgroundUniforms() {
+        if (backgroundUniformStorage == null) {
+            backgroundUniformStorage = new DynamicUniformStorage<>(
+                    "kltytonui_background_uniforms", io.github.kltyton.kltytonui.render.BackgroundUniforms.VECTOR_COUNT * 16, 16);
+        }
+        return backgroundUniformStorage.writeUniform(new BackgroundUniformData(backgroundUniforms.snapshot()));
+    }
+
+    private record BackgroundUniformData(float[] values)
+            implements DynamicUniformStorage.DynamicUniform {
+        @Override public void write(ByteBuffer buffer) {
+            for (float value : values) buffer.putFloat(value);
+        }
+
+        @Override public boolean equals(Object other) {
+            return this == other || other instanceof BackgroundUniformData data
+                    && java.util.Arrays.equals(values, data.values);
+        }
+
+        @Override public int hashCode() {
+            return java.util.Arrays.hashCode(values);
         }
     }
 
@@ -796,7 +860,7 @@ public final class RenderService implements KuiRenderService {
         GpuTexture depth = renderTarget.getDepthTexture();
         var encoder = RenderSystem.getDevice().createCommandEncoder();
         if (depth != null) {
-            encoder.clearColorAndDepthTextures(color, colorValue, depth, 1.0);
+            encoder.clearColorAndDepthTextures(color, colorValue, depth, 0.0);
             if (depth.getFormat().hasStencilAspect()) {
                 encoder.clearStencilTexture(depth, 0);
             }
@@ -823,12 +887,33 @@ public final class RenderService implements KuiRenderService {
     }
 
     @Override
+    public void drawOffscreenTexture(Matrix4f matrix, FboHandle target, float width, float height) {
+        RenderStateScope state = pushFilterRenderState();
+        try {
+            bindColorTexture(target, 0);
+            setShader(BackgroundPipelines.texture());
+            enableBlend();
+            setBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA,
+                    GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            MeshBuilder mesh = beginMesh(MeshMode.QUADS, MeshFormat.POSITION_TEX);
+            mesh.vertexUV(matrix, 0, height, 0, 0, 1);
+            mesh.vertexUV(matrix, width, height, 0, 1, 1);
+            mesh.vertexUV(matrix, width, 0, 0, 1, 0);
+            mesh.vertexUV(matrix, 0, 0, 0, 0, 0);
+            mesh.submit();
+        } finally {
+            if (state != null) state.close();
+        }
+    }
+
+    @Override
     public RenderStateScope pushFilterRenderState() {
         return new PipelineFilterState();
     }
 
     public void endFrame() {
         if (filterUniformStorage != null) filterUniformStorage.endFrame();
+        if (backgroundUniformStorage != null) backgroundUniformStorage.endFrame();
     }
 
     private final class PipelineFilterState implements RenderStateScope {
@@ -1058,10 +1143,11 @@ public final class RenderService implements KuiRenderService {
     }
 
     private GpuTexture currentDepthTexture() {
-        if (RenderSystem.outputDepthTextureOverride != null) {
+        RenderTarget target = OutputTargets.currentTarget();
+        if ((target == null || target == Minecraft.getInstance().gameRenderer.mainRenderTarget())
+                && RenderSystem.outputDepthTextureOverride != null) {
             return RenderSystem.outputDepthTextureOverride.texture();
         }
-        RenderTarget target = OutputTargets.currentTarget();
         if (target == null || !target.useDepth) return null;
         return target.getDepthTexture();
     }
@@ -1103,6 +1189,48 @@ public final class RenderService implements KuiRenderService {
         } finally {
             MemoryUtil.memFree(region);
         }
+    }
+
+    @Override
+    public boolean uploadTexturePixels(Object texture, ByteBuffer pixels, int byteOffset,
+                                       int x, int y, int width, int height) {
+        if (pixels == null || !pixels.isDirect() || byteOffset < 0 || x < 0 || y < 0 || width <= 0 || height <= 0) return false;
+        DynamicTexture dynamicTexture = (DynamicTexture) texture;
+        NativeImage image = dynamicTexture.getPixels();
+        if (image == null || image.isClosed() || image.format() != NativeImage.Format.RGBA) return false;
+        GpuTexture gpuTexture = dynamicTexture.getTexture();
+        if (gpuTexture == null) return false;
+
+        int imageWidth = image.getWidth();
+        int imageHeight = image.getHeight();
+        if (x > imageWidth - width || y > imageHeight - height) return false;
+        long sourceBytesLong = (long) width * height * 4L;
+        long imageBytesLong = (long) imageWidth * imageHeight * 4L;
+        if (sourceBytesLong > Integer.MAX_VALUE || imageBytesLong > Integer.MAX_VALUE
+                || byteOffset > pixels.limit() - sourceBytesLong) return false;
+        int sourceBytes = (int) sourceBytesLong;
+        int rowBytes = width * 4;
+
+        ByteBuffer source = pixels.duplicate();
+        source.position(byteOffset).limit(byteOffset + sourceBytes);
+        ByteBuffer upload = source.slice();
+        ByteBuffer imagePixels = image.getPixelBytes().duplicate();
+        ByteBuffer imageSource = upload.duplicate();
+        for (int row = 0; row < height; row++) {
+            int sourceOffset = row * rowBytes;
+            int destinationOffset = ((y + row) * imageWidth + x) * 4;
+            imageSource.clear();
+            imageSource.position(sourceOffset).limit(sourceOffset + rowBytes);
+            imagePixels.clear();
+            imagePixels.position(destinationOffset).limit(destinationOffset + rowBytes);
+            imagePixels.put(imageSource);
+        }
+
+        // DynamicTexture.dumpContents() reads this NativeImage mirror, so update it before
+        // issuing the synchronous backend upload from the shared stream buffer.
+        RenderSystem.getDevice().createCommandEncoder().writeToTexture(
+                gpuTexture, upload, 0, 0, x, y, width, height);
+        return true;
     }
 
     @Override public void closeTexture(Object texture) { ((DynamicTexture) texture).close(); }

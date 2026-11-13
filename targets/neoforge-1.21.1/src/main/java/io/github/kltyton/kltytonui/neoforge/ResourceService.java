@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.neoforge;
 
 import io.github.kltyton.kltytonui.render.SmoothRenderType;
+import io.github.kltyton.kltytonui.loader.ClientLoader;
 import io.github.kltyton.kltytonui.spi.KuiResourceService;
 import io.github.kltyton.kltytonui.spi.RenderHandle;
 import io.github.kltyton.kltytonui.spi.TextureKey;
@@ -11,8 +12,10 @@ import net.minecraft.server.packs.resources.ResourceManager;
 
 import java.io.InputStream;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Forge implementation of {@link KuiResourceService}, backed by the Minecraft
@@ -67,6 +70,17 @@ public final class ResourceService implements KuiResourceService {
         } catch (Exception ignored) {
         }
         return result;
+    }
+
+    public static Set<String> listThemeResourcePaths(ResourceManager manager) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        Map<ResourceLocation, Resource> resources = manager.listResources(
+                ClientLoader.THEME_RESOURCE_MANAGER_ROOT,
+                location -> location.getPath().endsWith(".css"));
+        for (Map.Entry<ResourceLocation, Resource> entry : resources.entrySet()) {
+            if ("kltytonui".equals(entry.getKey().getNamespace())) result.add(entry.getKey().getPath());
+        }
+        return Set.copyOf(result);
     }
 
     @Override

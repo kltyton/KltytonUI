@@ -2,7 +2,6 @@
 
 KltytonScreen 是 KUI 对 Minecraft Screen 的封装：把一个 HTML 加载成 Document，画到当前界面上，并把鼠标、键盘、滚轮输入转发给它。
 
-下文的 KubeJS 示例适用于 Forge 1.20.1 和 NeoForge 1.21.1；Java API 可用于其他 target。页面脚本可用范围见[总览](overview#loader-与脚本支持)。
 
 ## 三种页面宿主
 
@@ -76,24 +75,38 @@ public boolean resetViewportZoom()
 
 ## 生命周期
 
-```text
-new KltytonScreen(path)      // 只保存路径，不读 HTML
-  -> setScreen -> init()      // 创建 Document，解析 HTML/CSS/JS
-  -> DOMContentLoaded -> load
-  -> render() / 输入 / resize()
-  -> onClose()                // 先向 body 派发 unload，再移除 Document
+```mermaid
+flowchart TD
+  A[创建 KltytonScreen 或 KltytonContainerScreen] --> B[首次 init 创建 Document]
+  B --> C[解析页面并派发 DOMContentLoaded 和 load]
+  C --> D[渲染、输入和 resize]
+  D --> E{再次 init 时 Document 仍有效?}
+  E -->|是| F[复用 Document 并更新视口]
+  E -->|否| B
+  F --> D
+  D --> G[关闭并移除 Screen]
+  G --> H[派发 unload、移除 Document 并清理引用]
 ```
+
+`KltytonContainerScreen` 在复用 Document 时也会复用 `SlotDataBinder`，每次 init 后重新同步容器槽位位置。关闭并移除 Screen 后会清理 Document 与 binder；下次打开时再创建。
 
 几个容易踩的点：
 
-- `init()` 可能被重复调用（比如 resize），每次都会重建 Document；
+- `init()` 可能被重复调用（比如 resize）；只要 linked Document 仍有效，就会复用它并更新视口，页面状态不会因 resize 被重置；
 - `Document.refresh()` 保留 Document 本身但重建 DOM、重跑脚本。刷新后旧的 Element 引用和事件监听器全部失效，用 `document.getRefreshGeneration()` / `isCurrentGeneration(gen)` 判断代数；
 - 覆盖 `init()` / `onClose()` / `removed()` 时必须调 super，否则 Document 不会创建或不会清理；
 - 不要在子类里再调一次 `Document.create(同路径)`，会同时存在两个 Document，绘制和输入都翻倍。
 
 ## 页面 Meta 配置
 
-这两个 meta 标签是 KUI 的页面级配置，**所有宿主通用**（Screen、Overlay、Container、WorldWindow 都读它们）。完整说明只在这里维护一份，其他文档不再重复。
+这些 meta 标签是 KUI 的页面级配置，**所有宿主通用**（Screen、Overlay、Container、WorldWindow 都读它们）。
+
+| 配置 | 默认行为 | 用法 |
+| --- | --- | --- |
+| `kui-preload` | 首次打开时准备模板 | `<meta name="kui-preload">` 在资源加载阶段预先准备该页；`content="false"` 关闭 |
+| `kui-hyphen-break` | 允许在 `-`、`‐` 后换行 | `<meta name="kui-hyphen-break" content="false">` 保留编号和版本号中的连字符；空白、CJK 和 break-all 规则不变 |
+
+预加载会复用模板蓝图、CSS、字体与脚本编译结果，并通过现有异步图片缓存预取静态本地图像。页面 DOM、事件和初始化脚本仍在实际打开时创建或执行。资源重载会失效这一代缓存；远程图片和依赖布局尺寸的 SVG 保持按需加载。
 
 ### kui-viewport：逻辑视口
 
@@ -126,7 +139,7 @@ fixed 模式的 `scale` 可以是数值（`scale=1`）、`fit`（等比放进窗
 | `zoom-step` | 0.1 | 每次缩放步进 |
 | `user-scalable` | true | 是否允许快捷键缩放 |
 
-允许缩放时：Ctrl+滚轮、Ctrl+`+`/`-` 缩放，Ctrl+`0` 重置。缩放值按页面路径存到 `config/kltytonui/viewport-zoom.properties`，重开页面会记住上次的值。
+允许缩放时：Ctrl+滚轮、Ctrl+`+`/`-` 缩放，Ctrl+`0` 重置。缩放时右下角会显示当前百分比和“重置”按钮；缩放值按页面路径存到 `config/kltytonui/viewport-zoom.properties`，重开页面会记住上次的值。
 
 把 `user-scalable` 设为 `false` 可禁用这套快捷键——Ctrl+滚轮退化为普通滚动，Java 的 `document.setViewportZoom(...)` 不受影响。细节见[浏览器辅助功能](browser-features#页面缩放)。
 
@@ -178,14 +191,6 @@ if (Minecraft.getInstance().screen instanceof KltytonScreen screen) {
 }
 ```
 
-KubeJS 客户端脚本：
-
-```javascript
-const document = KltytonUI.getCurrentScreenDocument();
-```
-
-两者都只在当前 Screen 真的是 KltytonScreen 时有值。`KltytonUI.screen(path)` 打开的是容器 Screen，会返回 null——别用路径匹配代替这个方法。
-
 ## 需要容器时
 
 KltytonScreen 没有 Menu 和真实槽位。页面要操作玩家背包、方块实体容器或服务端数据，走容器入口：
@@ -194,11 +199,11 @@ KltytonScreen 没有 Menu 和真实槽位。页面要操作玩家背包、方块
 KltytonUI.menu(player, "screens/inventory.html").bind(binding -> binding.player());
 ```
 
-或客户端脚本 `KltytonUI.screen("screens/inventory.html")`。详见[容器文档](container)。
+详见[容器文档](container)。
 
 ## 资源重载
 
-触发「重载资源」操作会重扫资源并 refresh 所有普通 Document：重跑脚本、重建 DOM。所以 JS 顶层变量、动态加的节点、输入框的值都不会保留——需要留的数据放到 Java/KubeJS 侧，在 `load` 里写回页面。该按键操作默认未绑定，可在 MC 控制设置中自行绑定。`document.setReloadPersistent(true)` 可以让独立 Overlay 跳过重载，但 Screen 绑定的 Document 别这么干，容易让页面代码和资源版本对不上。
+触发「重载资源」操作会重扫资源并 refresh 所有普通 Document：重跑脚本、重建 DOM。所以 JS 顶层变量、动态加的节点、输入框的值都不会保留——需要留的数据放到 Java 侧，在 `load` 里写回页面。该按键操作默认未绑定，可在 MC 控制设置中自行绑定。`document.setReloadPersistent(true)` 可以让独立 Overlay 跳过重载，但 Screen 绑定的 Document 别这么干，容易让页面代码和资源版本对不上。
 
 ## 常见问题
 

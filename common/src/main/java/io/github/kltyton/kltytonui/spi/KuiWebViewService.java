@@ -56,6 +56,13 @@ public interface KuiWebViewService {
      */
     View create(String url, int width, int height, boolean transparent, int frameIntervalMs);
 
+    /** Creates a view with its initial capture mode, before its first frame. */
+    default View create(String url, int width, int height, boolean transparent, int frameIntervalMs, int captureQuality) {
+        View view = create(url, width, height, transparent, frameIntervalMs);
+        if (view != null) view.setCaptureQuality(captureQuality);
+        return view;
+    }
+
     /** A hosted web view. All methods are no-ops once {@link #isValid()} is false. */
     interface View {
 
@@ -141,6 +148,21 @@ public interface KuiWebViewService {
 
         /** Runs script in the page. */
         void eval(String script);
+
+        /** Enables opt-in messaging; older pixel-only backends must report missing support. */
+        default void enableBridge(boolean enabled) {
+            throw new UnsupportedOperationException("WebView backend does not support messaging");
+        }
+
+        /** Triples of native navigation generation, actual source URI and JSON. */
+        default String[] drainMessages() {
+            throw new UnsupportedOperationException("WebView backend does not support messaging");
+        }
+
+        /** Queues a JSON message only for the specified navigation generation. */
+        default boolean postMessage(long generation, String json) {
+            throw new UnsupportedOperationException("WebView backend does not support messaging");
+        }
 
         /**
          * The view's image update stream, or null when this backend cannot stream pixels.

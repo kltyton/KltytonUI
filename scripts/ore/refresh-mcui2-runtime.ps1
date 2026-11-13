@@ -21,7 +21,6 @@ $previousTmp = $env:TMP
 $previousTmpDir = $env:TMPDIR
 $previousNpmCache = $env:npm_config_cache
 $previousNodePath = $env:NODE_PATH
-$previousRhinoPlugin = $env:KUI_RHINO_SEMANTICS_PLUGIN
 $env:TEMP = $temp
 $env:TMP = $temp
 $env:TMPDIR = $temp
@@ -54,7 +53,7 @@ try {
         & npm install --prefix $babelRoot --no-save --no-package-lock --ignore-scripts `
             --audit=false --fund=false `
             '@babel/core@7.28.4' '@babel/cli@7.28.3' `
-            '@babel/preset-env@7.28.3' '@babel/types@7.28.4'
+            '@babel/preset-env@7.28.3'
         if ($LASTEXITCODE -ne 0) { throw 'Babel toolchain install failed' }
     }
 
@@ -66,12 +65,10 @@ module.exports = {
   assumptions: { superIsCallableConstructor: true },
   presets: [['@babel/preset-env', {
     targets: { ie: '11' }, bugfixes: true, modules: false, useBuiltIns: false
-  }]],
-  plugins: [process.env.KUI_RHINO_SEMANTICS_PLUGIN]
+  }]]
 };
 '@, [Text.UTF8Encoding]::new($false))
     $env:NODE_PATH = Join-Path $babelRoot 'node_modules'
-    $env:KUI_RHINO_SEMANTICS_PLUGIN = Join-Path $project 'scripts\runtime\rhino-semantics.cjs'
 
     $scripts = @('mcui-oreui', 'mcui-icons-normal', 'mcui-icons-key',
         'mcui-icons-x', 'mcui-sounds-default')
@@ -79,14 +76,14 @@ module.exports = {
         $source = Join-Path $bundle "$name.kui.iife.js"
         $target = Join-Path $bundle "$name.kui.js"
         & node $babel $source --out-file $target --config-file $config
-        if ($LASTEXITCODE -ne 0) { throw "Rhino transform failed: $name" }
+        if ($LASTEXITCODE -ne 0) { throw "JavaScript transform failed: $name" }
         & node --check $target
         if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $name" }
     }
     $gallerySource = Join-Path $bundle 'gallery\gallery.kui.iife.js'
     $galleryTarget = Join-Path $bundle 'gallery\gallery.kui.js'
     & node $babel $gallerySource --out-file $galleryTarget --config-file $config
-    if ($LASTEXITCODE -ne 0) { throw 'Rhino transform failed: gallery' }
+    if ($LASTEXITCODE -ne 0) { throw 'JavaScript transform failed: gallery' }
     & node --check $galleryTarget
     if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax check failed: gallery' }
 
@@ -131,5 +128,4 @@ module.exports = {
     $env:TMPDIR = $previousTmpDir
     $env:npm_config_cache = $previousNpmCache
     $env:NODE_PATH = $previousNodePath
-    $env:KUI_RHINO_SEMANTICS_PLUGIN = $previousRhinoPlugin
 }

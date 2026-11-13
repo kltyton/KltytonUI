@@ -64,7 +64,7 @@ public abstract class AbstractText extends Element {
                 if (canEditText() && document != null) {
                     String primary = document.getDocumentSelectedText();
                     if (primary != null && !primary.isEmpty()) {
-                        replaceSelection(primary);
+                        insertText(primary, "insertFromPaste");
                     }
                 }
                 return;
@@ -310,26 +310,34 @@ public abstract class AbstractText extends Element {
     }
 
     public void replaceSelection(String str) {
+        replaceSelection(str, "deleteContentBackward");
+    }
+
+    public void replaceSelection(String str, String deleteInputType) {
         if (!canEditText()) return;
         String normalized = str == null ? "" : normalizeInsertedText(str);
         if (normalized.isEmpty()) {
             if (!hasSelection()) return;
-            if (!dispatchBeforeInputEvent("deleteContentBackward", null)) return;
+            if (!dispatchBeforeInputEvent(deleteInputType, null)) return;
             pushUndoState();
-            sliceText(selMin(), selMax(), "deleteContentBackward", true);
+            sliceText(selMin(), selMax(), deleteInputType, true);
             return;
         }
         insertText(normalized);
     }
 
     public void insertText(String str) {
+        insertText(str, "insertText");
+    }
+
+    public void insertText(String str, String inputType) {
         if (!canEditText()) return;
         if (str == null || str.isEmpty()) return;
 
         ensureValue();
         str = normalizeInsertedText(str);
         if (str.isEmpty()) return;
-        if (!dispatchBeforeInputEvent("insertText", str)) return;
+        if (!dispatchBeforeInputEvent(inputType, str)) return;
         pushUndoState();
 
         if (hasSelection()) {
@@ -358,7 +366,7 @@ public abstract class AbstractText extends Element {
         clearSelection();
         clampScroll();
         getRenderer().text.clear();
-        dispatchInputEvent("insertText", str);
+        dispatchInputEvent(inputType, str);
     }
 
     private String normalizeInsertedText(String str) {

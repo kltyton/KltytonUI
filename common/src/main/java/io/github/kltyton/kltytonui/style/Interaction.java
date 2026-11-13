@@ -185,7 +185,7 @@ public final class Interaction {
         if (raw == null || raw.isBlank()) return "auto";
         String value = raw.trim().toLowerCase(Locale.ROOT);
         if (value.equals("auto")) return value;
-        List<String> tokens = io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokens(value);
+        List<String> tokens = io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokensCached(value);
         if (tokens.size() != 2) return "auto";
         for (String token : tokens) {
             if (token == null || token.isBlank() || !isColorToken(token)) return "auto";
@@ -206,12 +206,12 @@ public final class Interaction {
     private static String scrollbarColorToken(String raw, int index) {
         String value = normalizeScrollbarColor(raw);
         if ("auto".equals(value)) return null;
-        List<String> tokens = io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokens(value);
+        List<String> tokens = io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokensCached(value);
         return index < tokens.size() ? tokens.get(index) : null;
     }
 
     private static boolean isNonNegativeLength(String value) {
-        for (String token : io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokens(value)) {
+        for (String token : io.github.kltyton.kltytonui.parser.CssString.splitTopLevelTokensCached(value)) {
             if (!token.endsWith("px")) return false;
             String number = token.substring(0, token.length() - 2).trim();
             try {

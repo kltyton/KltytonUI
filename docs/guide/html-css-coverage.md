@@ -10,28 +10,28 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 | 🟡 | 部分支持：能解析、有行为，但与规范有明确差距 |
 | ❌ | 不支持：设置后被忽略（CSS 属性会 warn 一次） |
 
-总体画像：选择器层最完整；布局是"常用子集 + 关键缺失"（没 float、没表格布局、没 sticky）；绘制层覆盖挺广（阴影、滤镜、clip-path、transform、动画都行）；HTML 层面向 UI 而非文档——**没有 UA 默认样式**，`h1` 和 `div` 视觉上没区别。
+总体画像：选择器层最完整；布局是"常用子集 + 关键缺失"（没 float、没 sticky）；绘制层覆盖挺广（阴影、滤镜、clip-path、transform、动画都行）；HTML 层面向 UI 而非文档——提供控件和表格所需的基础默认样式，页面排版由 CSS 决定。
 
 ## 迁移速查
 
 赶时间只看这一节。把浏览器页面搬进 KUI 前，按优先级检查：
 
-1. **UA 样式为零**：h1-h6、p、ul/li 的样式全部自己写；别用 br/hr 表达布局；
-2. **布局避开**：float、sticky、grid 的 areas/auto-flow/命名线、负 margin、表格布局；
-3. **值解析避开**：calc 乘除、border 虚线等样式（只有实线）、currentColor、26 个以外的命名色、radial/conic 渐变、skew/matrix transform；
+1. **页面排版由 CSS 决定**：为标题、段落和列表指定所需样式；表格标签保留原生布局角色；
+2. **布局边界**：float、sticky 和负 margin 仍受限制；Grid 支持 areas、auto-flow、命名线和隐式轨道，表格使用自动列宽布局；
+3. **值解析避开**：calc 乘除、border 线型的具体支持范围、26 个以外的命名色、radial/conic 渐变、skew/matrix transform；
 4. **层叠注意**：层叠按浏览器标准排序——内联普通 > 样式表普通，样式表 `!important` > 内联普通，内联 `!important` 最高；
 5. **文本注意**：italic 无效（用 oblique）、justify 无效、vertical-align 只有 baseline 有效、text-decoration 只有下划线/删除线；
 6. **表单注意**：date/email/url 等 type 降级为纯文本框；form 提交只发事件不发请求；
-7. **transition 白名单**：名单外属性（gap、grid-template、font-size 等）直接跳变。
+7. **transition 白名单**：支持 gap 和结构匹配的 Grid 轨道插值；名单外属性直接跳变。
 
 ## HTML 解析器
 
-基于正则的分词器，不是标准 tree builder。
+分词器识别属性引号边界，保留引号内的 `>` 和文本中的普通 `<`；树构建仍是框架自身的实现。
 
 - ✅ 属性各种写法、注释、doctype 剥离、自闭合与 void 标签、script/style raw text、总是合成 html/head/body；
 - 🟡 命名实体只有 `amp apos gt lt nbsp quot` 六个 + 数字实体；有弹栈错误恢复，但**没有浏览器的隐含标签生成**——不会自动闭合 `<p>`、不补 `<tbody>`；
 - 🟡 `<script>` 带 src 又写内联时**两个都执行**（非标准）；没有 defer/async/module；
-- `<head>` 子节点（title 等）不进 DOM，没有 `document.title`；`<meta>` 只读 kui-viewport、kui-mouse-events 两个 kui-* 专用配置（见 [meta 章节](kltytonui-screen#页面-meta-配置)），charset 固定 UTF-8。
+- `<head>` 中的样式表 link 保留在 DOM，移除时卸载对应样式表；运行时插入的 link/style 在重载样式时保留。`<meta>` 支持 kui-viewport、kui-mouse-events、kui-preload 和 kui-hyphen-break（见 [meta 章节](kltytonui-screen#页面-meta-配置)），charset 固定 UTF-8。
 
 ## HTML 元素
 
@@ -79,7 +79,7 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 
 ## 布局
 
-**display**：block/inline/inline-block/flex/inline-flex/grid/inline-grid/none ✅；table/list-item/flow-root 降级 block；contents 等未知值一律 block。
+**display**：支持 block、inline、inline-block、flex、inline-flex、grid、inline-grid、none，以及 table、table-row-group、table-header-group、table-footer-group、table-row、table-cell。list-item、flow-root 和其他未知值按 block 处理。
 
 **盒模型**：
 
@@ -93,7 +93,9 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 
 **Flexbox**：row/column、row-reverse/column-reverse、wrap/wrap-reverse（**含 column 方向换行**：定高容器按累计高超限切列，列内 justify-content、列间 align-content、列内 align-items 均生效；auto 高按规范保持单列）、justify-content 六值及 `start`/`end`/`left`/`right`/`normal` 别名（`left`/`right` 在 column 方向按规范退 flex-start）、grow/shrink/basis（**`flex-basis: content` 取自然尺寸不塌缩**；`flex` 简写省略 basis 时按规范为 `0%`）、**分配过程遵守 min/max**（flex base 先钳成 hypothetical main size，min 冲突时胜出；grow 触 max 冻结并把余量重分给兄弟项，全冻结后剩余空间交给 justify-content）、gap、auto margin、匿名 item、order、align-content（含 `end`/`normal`，后者按规范等同 stretch）都 ✅；匿名文本项（直接文本）在 row 容器内容宽处**软换行** ✅（已知 MVP 偏差：混排时文本按容器全宽折行而非 shrink 后实分宽度；多个匿名项各自按全宽折行）；align-items/align-self 的 **baseline ✅**：row 方向按基线共享组对齐（混合 align-self 时仅 computed 值为 baseline 的项进组，其余项保持自身对齐）、wrap 容器按每一行分别对齐、column 方向按规范等价 flex-start；`first baseline`/`last baseline` 别名按规范等同 `baseline`。
 
-**Grid**（MVP）：template-columns/rows（px/auto/fr/minmax/repeat 含 auto-fill/fit）、gap、items/self 对齐、`grid-row/column` 的 `N`、`span N`、`N / M`、自动放置 ✅；❌ 命名线、template-areas、auto-flow、隐式轨道、place-* 简写、subgrid。
+**Grid**：支持显式与隐式轨道、px/auto/fr/minmax/repeat/fit-content、min/max-content、gap、items/self 对齐、命名线、template-areas、auto-flow/dense、place-* 简写和 subgrid。直接文本参与网格布局和文本选择，绝对定位子项可使用指定网格区域作为包含块。
+
+**表格**：自动布局共享列宽和行高，支持行组、colspan/rowspan、单元格宽高约束及独立边框。
 
 **行内**：inline/inline-block 换行、基线对齐 ✅；**vertical-align**：baseline 行内基线对齐、middle/center/bottom/text-bottom 文本垂直对齐 ✅；sub/super/top/text-top 静默无效。
 
@@ -131,21 +133,21 @@ KUI 是自研的 HTML/CSS 引擎，不是内嵌浏览器。这篇回答一个问
 
 ## 颜色、交互、动画
 
-**颜色**：hex 全家、rgb/rgba 新旧语法、hsl/hsla、transparent ✅；支持 `color(srgb-linear r g b / a)` 线性光颜色，组件在渲染器 16 倍 SDR 工作范围内保留；`dynamic-range-limit` 支持 `standard`、`constrained`、`no-limit`、数字和百分比，并在 filter shader 中映射工作范围。普通 8-bit framebuffer 在最终显示时仍会钳制 SDR 白点以上的能量。命名色只有 26 个（CSS 有 148 个）；**currentColor 解析为黑**（SVG 内部除外）；hwb/lab/lch/oklch ❌。
+**颜色**：hex 全家、rgb/rgba 新旧语法、hsl/hsla、transparent ✅；支持 `color(srgb-linear r g b / a)` 线性光颜色，组件在渲染器 16 倍 SDR 工作范围内保留；`dynamic-range-limit` 支持 `standard`、`constrained`、`no-limit`、数字和百分比，并在 filter shader 中映射工作范围。普通 8-bit framebuffer 在最终显示时仍会钳制 SDR 白点以上的能量。命名色只有 26 个（CSS 有 148 个）；背景、边框、线性渐变、遮罩和 SVG paint 中的 **currentColor 使用元素的计算文字色**，缺少上下文时使用默认文字色；hwb/lab/lch/oklch ❌。
 
 **交互**：cursor 常用值 + `url()` 自定义 ✅（move/wait/grab 等回退箭头）；user-select、pointer-events、accent-color、appearance、resize（textarea）✅；outline 简写与 outline-width/style/color/offset 已接入，支持实线、虚线和负偏移，其余可见线型按实线绘制。焦点框在子内容之后绘制，不占布局尺寸、不参与命中。
 
 **伪元素 content**：只支持单个引号字符串；attr()/counter()/url()/多段拼接 ❌。
 
-**transition**：简写、逗号列表、all、延迟、中断反向重定向 ✅；但**可动画属性是白名单**——opacity、宽高、transform、filter、color、background-color、位置四边、margin/padding、border-width、border-radius、box-shadow；名单外直接跳变。
+**transition**：支持简写、property/duration/delay/timing-function 四个长写属性、CSS 变量、逗号列表、all、延迟和中断反向重定向；**可动画属性是白名单**——opacity、宽高、transform、filter、color、background-color、位置四边、margin/padding、border-width、border-radius、box-shadow、gap、结构匹配的 Grid 轨道；名单外直接跳变。
 
 **animation**：简写全家、多动画、四种 direction/fill-mode、steps/cubic-bezier ✅；插值上 transform/filter/box-shadow 有专用插值，其余走通用数值/颜色插值，离散属性不动画。
 
 ## 渲染层
 
 - 文字：自定义字体走 AWT 逐字形光栅（按字形目标物理尺寸 1:1 光栅，颜色绘制期染色），字形位图打进共享图集；MC 字体走原版管线；
-- 图片：UV 窗口、多层平铺、九宫格、合批；
-- 遮罩：stencil 模板遮罩（含圆角）、scissor、滚动裁剪；
+- 图片：UV 窗口、多层平铺、九宫格、合批；image-rendering 支持 auto/smooth/high-quality/crisp-edges/pixelated，pixelated 放大使用最近邻、缩小使用平滑过滤；
+- 遮罩：圆角、clip-path、scissor 和滚动裁剪；Fabric 26.1/26.2 使用保留颜色与深度的合成层，提供硬件模板接口的后端使用 stencil；
 - 滤镜：离屏 FBO、可分离 blur；
 - Canvas 2D：路径全 API、渐变/pattern、ImageData、Path2D（SVG path 全命令）、OffscreenCanvas；无 conicGradient、WebGL；
 - SVG：基础图形 + path（含弧线、evenodd）+ fill/stroke 系 + currentColor，4x 超采样输出位图；无 g/defs/use/text、渐变、filter、transform 属性、嵌套 svg。

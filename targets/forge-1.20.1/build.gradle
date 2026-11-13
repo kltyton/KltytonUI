@@ -217,15 +217,8 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation ("curse.maven:rhino-416294:6186971")
-
-    // Rhino is the required page runtime; KubeJS only adds optional bindings.
-    modCompileOnly ("curse.maven:kubejs-238086:5853326")
-    modCompileOnly ("curse.maven:rhino-416294:6186971")
+    testRuntimeOnly 'com.ibm.icu:icu4j:71.1'
     modCompileOnly ("curse.maven:architectury-api-419699:5137938")
-
-    modRuntimeOnly ("curse.maven:kubejs-238086:5853326")
-    modRuntimeOnly ("curse.maven:rhino-416294:6186971")
     modRuntimeOnly ("curse.maven:architectury-api-419699:5137938")
     // 8348481 is built for 1.20.4 despite CurseForge listing 1.20.1; its
     // GuiGraphics/Minecraft mixins do not match Forge 1.20.1. Use the native
@@ -566,4 +559,5 @@ tasks.named('jacocoTestReport', JacocoReport).configure {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

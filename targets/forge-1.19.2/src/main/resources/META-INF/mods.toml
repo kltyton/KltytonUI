@@ -9,12 +9,6 @@ license = "${mod_license}"
     description = '''${mod_description}'''
     clientRequired = true
 [[dependencies."${mod_id}"]]
-    modId = "rhino"
-    mandatory = true
-    versionRange = "[1,)"
-    ordering = "BEFORE"
-    side = "CLIENT"
-[[dependencies."${mod_id}"]]
     modId = "forge"
     mandatory = true
     versionRange = "${forge_version_range}"
@@ -27,15 +21,9 @@ license = "${mod_license}"
     ordering = "NONE"
     side = "BOTH"
 
-[[dependencies."${mod_id}"]]
-    modId = "kubejs"
-    mandatory = false
-    versionRange = "[1.0.0,)"
-    ordering = "NONE"
-    side = "SERVER"
-[[dependencies."${mod_id}"]]
-    modId = "kubejs"
-    mandatory = false
-    versionRange = "[1.0.0,)"
-    ordering = "NONE"
-    side = "CLIENT"
+[[dependencies.${mod_id}]]
+modId = "geckolib3"
+mandatory = false
+versionRange = "[1.0.0,)"
+ordering = "AFTER"
+side = "CLIENT"

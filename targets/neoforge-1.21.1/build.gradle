@@ -108,15 +108,6 @@ neoForge {
 repositories {
     mavenCentral()
     mavenLocal()
-    // KubeJS / Rhino (see D:\work\reference\KUI for the reference coordinates)
-    maven {
-        name = "Latvian"
-        url = "https://maven.latvian.dev/releases"
-        content {
-            includeGroup "dev.latvian.mods"
-            includeGroup "dev.latvian.apps"
-        }
-    }
     maven {
         name = "JitPack"
         url = "https://jitpack.io"
@@ -144,18 +135,6 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-
-    // Tests compile against common/, whose public API exposes Rhino types
-    // (e.g. Element#addEventListener(String, Function)), so Rhino must be on
-    // the test compile classpath just like in the forge-1.20.1 target.
-    testImplementation "dev.latvian.mods:rhino:${rhino_121_version}"
-
-    // Rhino is the required page runtime; KubeJS only adds optional bindings.
-    // Coordinates from D:\work\reference\KUI (1.21.1 NeoForge).
-    compileOnly "dev.latvian.mods:rhino:${rhino_121_version}"
-    compileOnly "dev.latvian.mods:kubejs-neoforge:${kubejs_121_version}"
-    runtimeOnly "dev.latvian.mods:rhino:${rhino_121_version}"
-    runtimeOnly "dev.latvian.mods:kubejs-neoforge:${kubejs_121_version}"
 
     // 本地 dev 工具（spark 性能分析器等）：把 mod jar 放进 dev-libs/（gitignored）
     // 即被 client/server run 加载，不进发布产物。走本地文件而非 Modrinth maven
@@ -209,9 +188,6 @@ tasks.withType(JavaCompile).configureEach {
 // extend it, mirroring the forge-1.20.1 target.
 configurations {
     testRuntimeClasspath {
-        // KubeJS is optional at runtime and is not needed by headless unit tests.
-        // Keeping it off this classpath avoids resolving its dynamic transitives.
-        exclude group: 'dev.latvian.mods', module: 'kubejs-neoforge'
         // spark 是 dev-run 专用分析器，单测 worker 不需要，排除以保持 --offline 可跑
         exclude group: 'maven.modrinth', module: 'spark'
     }
@@ -219,7 +195,6 @@ configurations {
         canBeConsumed = false
         canBeResolved = true
         extendsFrom modDevRuntimeDependencies
-        exclude group: 'dev.latvian.mods', module: 'kubejs-neoforge'
         exclude group: 'maven.modrinth', module: 'spark'
     }
 }
@@ -236,4 +211,5 @@ tasks.withType(Test).configureEach {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

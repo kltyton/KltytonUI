@@ -17,7 +17,7 @@ Ore is the framework's built-in pure-CSS theme: MC-style pixel borders, dark sto
 - It provides a dark canvas background, 16px font size, and box-sizing propagation by default, but it won't fill the screen for you — add `min-height:100vh` yourself for fullscreen;
 - Licensed under MPL-2.0; keep the `license.txt` in the theme directory when redistributing with your mod.
 
-The showcase page `kltytonui/theme/ore/example.html` can be opened directly with `new KltytonScreen(...)` — its seven pages demonstrate every component — **look at it before reading the class list in this document**; it's more intuitive than reading tables.
+The repository's `theme/ore/example.html` demonstrates these components. Copy it into your own resources to preview it in game; the distribution JAR does not include example pages.
 
 ## Design Tokens
 

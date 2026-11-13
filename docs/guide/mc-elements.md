@@ -59,26 +59,29 @@ CSS 自定义属性优先于 HTML 属性。单候选不会轮播。无效表达�
 
 ## `<recipe>`：配方预览
 
-`<recipe>` 按配方 ID 从当前世界的配方管理器生成只读预览：
+`<recipe>` 接受两种查询方式，`type` 均必填。元素文本优先按旧版契约作为配方 ID 精确查询；只有该 ID 不存在时，才把文本按产物物品 ID 搜索。为明确查询产物并避免配方 ID 与物品 ID 重名的歧义，使用 `output` 属性：
 
 ```html
-<recipe type="crafting_shaped">minecraft:crafting_table</recipe>
+<recipe type="crafting_shaped">minecraft:stick</recipe>
+<recipe type="smelting" output="minecraft:iron_ingot"></recipe>
 ```
 
-配方 ID 写在元素文本中，`type` 必须填写并与配方类别相符：
+第一种写法保留按 recipe ID 查找的旧行为；若没有同 ID 配方，则文本也可作为产物 ID 扫描。`output` 写法始终按产物 ID 搜索，并可显示多个匹配配方，按配方 ID 排序后每秒切换。精确 recipe ID 存在时优先使用它，即使同名物品也有其他配方；显式 `output` 可选择产物扫描。匹配只比较产物物品 ID，显示保留配方的产出数量和物品数据。支持以下类型：
 
 | `type` | 预览内容 |
 | --- | --- |
 | `crafting_shaped` | 3×3 合成输入和输出 |
 | `crafting_shapeless` | 3×3 无序合成输入和输出 |
 | `smelting`、`blasting`、`smoking`、`campfire_cooking` | 输入、燃料候选和输出 |
-| `stonecutting` | 输入和最多三个匹配的切石输出 |
+| `stonecutting` | 输入和指定的产物 |
 | `smithing` | 锻造模板、输入、添加物和输出 |
 | `fallback` | 其他配方：最多八个输入和输出 |
 
 预览生成的 `<slot>` 是展示用途，不占用菜单槽位，也不能点击或取放物品。它使用普通 `<slot>` 的 CSS 属性；配方本身默认使用 CSS Grid，间距、槽位尺寸和列数可通过 `--kui-recipe-gap`、`--kui-recipe-slot-size`、`--kui-recipe-columns` 调整。生成槽位带有 `kui-recipe-input`、`kui-recipe-output` 等角色类，可按角色覆写样式。
 
-无效或缺失的 `type`、找不到配方、类型不匹配时会记录日志，并把错误写入 `data-recipe-error`；成功时该属性为空。布局类型写入 `data-recipe-layout`，可用于 CSS 选择器。当前没有可用世界或配方管理器时无法生成预览。
+同类型有多个匹配配方时，按配方 ID 排序，每 1000 毫秒整体切换一次输入和输出。鼠标悬停在配方或其子元素上时暂停，移开后等待完整的一秒再继续；只有一个配方时保持静态。修改文本或 `type`、切换世界或重新加载配方数据会重置预览。
+
+无效或缺失的 `type`、无效的产物 ID、没有匹配配方时会清空旧预览，并把错误写入日志和 `data-recipe-error`；成功时该属性为空。布局类型写入 `data-recipe-layout`，可用于 CSS 选择器。当前没有可用世界或配方管理器时无法生成预览。26.1 目标目前通过本地服务器读取配方，仅支持单人世界。
 
 ## 与 `<slot>` 的关系
 

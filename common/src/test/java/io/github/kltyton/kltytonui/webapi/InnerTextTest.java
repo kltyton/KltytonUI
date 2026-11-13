@@ -2,12 +2,10 @@ package io.github.kltyton.kltytonui.webapi;
 
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
-import io.github.kltyton.kltytonui.parser.JS;
 import io.github.kltyton.kltytonui.style.Text;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class InnerTextTest {
     @Test
@@ -188,15 +186,6 @@ class InnerTextTest {
         assertEquals("a<br>b<br>c<br>", host.getInnerHTML());
         assertEquals("abc", host.getTextContent());
         assertEquals("a\nb\nc\n", host.getInnerText());
-    }
-
-    @Test
-    void rhinoRewriteKeepsInnerTextAsAnIndependentProperty() {
-        String source = "node.innerText = node.textContent;";
-        String rewritten = JS.rewriteForRhino(source);
-
-        assertEquals(source, rewritten);
-        assertFalse(rewritten.equals("node.textContent = node.textContent;"));
     }
 
     private static void assertInnerText(Document document, String html, String expected) {

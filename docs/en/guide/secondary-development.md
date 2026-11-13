@@ -1,6 +1,6 @@
-# Secondary Development: Custom Elements and KubeJS Bindings
+# Secondary Development: Custom Elements and Frame Timing
 
-For mod authors who want to add things to KUI. Three extension points: custom DOM elements, KubeJS global bindings, and the frame-timing HUD. KubeJS bindings are currently registered only on Forge 1.20.1 and NeoForge 1.21.1; page scripts execute only on Forge 1.20.1, NeoForge 1.21.1, and NeoForge 26.1. For page-side APIs see the [Web API doc](web-api); for usage of the built-in extension tags see the [Extension Elements doc](extension-elements).
+Mod authors can register custom DOM elements and use the frame-timing HUD. See the [Web API](web-api) for page scripts and [Extension Elements](extension-elements) for built-in tags.
 
 ## Two Boundaries to Hold First
 
@@ -71,37 +71,6 @@ Key points and pitfalls:
 - Elements that don't need custom drawing don't need to override `drawPhase`; CSS works as usual;
 - When doing custom drawing: get sizes from `Box.of(this)` / `getBoundingClientRect()`; handle zero size and not-yet-ready resources first; don't create DynamicTextures, parse strings, or trigger layout every frame; once resources are asynchronously ready, update internal state and call `document.markDirty(this, ...)`.
 
-## Registering KubeJS Bindings
-
-This section applies only to the Forge 1.20.1 and NeoForge 1.21.1 targets; Fabric targets and NeoForge 26.1 currently do not register KUI's KubeJS bindings.
-
-Add `@KJSBindings` to a static-method class, and the class enters scripts as a global object:
-
-```java
-@KJSBindings(value = "ExampleKui", modId = "examplemod", isClient = true)
-public final class ExampleKuiBindings {
-    private ExampleKuiBindings() {}
-
-    public static String hello(String name) {
-        return "Hello, " + name;
-    }
-}
-```
-
-```javascript
-// in the page script
-console.log(ExampleKui.hello("Kltyton"));
-```
-
-Register during mod initialization: `KubeJS.scanPackage("com.example.mod.kjs")`.
-
-- If `value` is empty, the simple class name is used; if `modId` is filled in, registration only happens when that mod is loaded;
-- `isClient = true` goes into client scripts (Document/Toast/WorldWindow and the like), `false` into server scripts (containers, player data) — it is a registration filter, **not** a side-safety guarantee: if a client binding class references MC client classes, don't register it on the server side;
-- Give global names a mod prefix; express failure with null/Optional and document it clearly;
-- Keep binding methods public and static, use parameter and return types Rhino can convert reliably; don't shove complex DOM traversal into per-frame script calls.
-
-After changing annotations or scan packages, restart KubeJS/the client — **Reload Resources** only reloads page resources.
-
 ## frameTimingHud: Frame-Timing HUD
 
 `config/kltytonui-client.toml`:
@@ -129,6 +98,5 @@ How to use it: keep the page stable until the window fills up → note `avg`/`ma
 
 **Page initialization errors after registration**: read the KUI error log with the path and tag name. Is attribute initialization written in the constructor — move it to `onInitFromDom`. When drawing, check sizes, resource handles, and document validity.
 
-**KJS global object doesn't exist**: is KubeJS loaded? Was scanPackage called? Is the mod for modId present? Does the script's runtime side match `isClient`? Restart after changes.
 
 **HUD values fluctuate up and down**: built-in pages like DevTools and the resource manager themselves change batching. Use the 120-frame rolling avg for trends and max for spikes — don't treat single-frame fluctuation as a regression.

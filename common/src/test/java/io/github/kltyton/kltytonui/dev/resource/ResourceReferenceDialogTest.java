@@ -40,7 +40,7 @@ class ResourceReferenceDialogTest {
         Loader.StaticResourceEntry entry = entry("screens/inventory.html", "html");
 
         List<ResourceReferenceDialog.ReferenceOption> options =
-                ResourceReferenceDialog.optionsFor(entry, "", "java");
+                ResourceReferenceDialog.optionsFor(entry, "");
 
         assertTrue(ResourceReferenceDialog.supports(entry));
         assertEquals(4, options.size());
@@ -55,27 +55,6 @@ class ResourceReferenceDialogTest {
                     new Vec3(0.0, 64.0, 0.0),
                     16
                 );""", options.get(3).snippet());
-    }
-
-    @Test
-    void htmlKjsReferencesCoverAllFourRenderingScenarios() {
-        Loader.StaticResourceEntry entry = entry("screens/inventory.html", "html");
-
-        List<ResourceReferenceDialog.ReferenceOption> options =
-                ResourceReferenceDialog.optionsFor(entry, "", "kjs");
-
-        assertEquals(4, options.size());
-        assertEquals("KltytonUI.screen(\"screens/inventory.html\")", options.get(0).snippet());
-        assertEquals("KltytonUI.menu(player, \"screens/inventory.html\")"
-                + ".bind(bindings => bindings.player())", options.get(1).snippet());
-        assertEquals("let overlay = KltytonUI.createDocument(\"screens/inventory.html\")",
-                options.get(2).snippet());
-        assertEquals("""
-                let worldWindow = KltytonUI.createWorldWindow(
-                    "screens/inventory.html",
-                    0, 64, 0,
-                    16
-                )""", options.get(3).snippet());
     }
 
     private static Loader.StaticResourceEntry entry(String path, String extension) {

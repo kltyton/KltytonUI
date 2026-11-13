@@ -122,7 +122,7 @@ The UI has four areas: a resource tree on the left, a path navigator at the top,
 
 **EDIT META**: Edits the KUI meta tags in the HTML head (`kui-viewport`, `kui-mouse-events`, and charset); non-KUI meta and the body are preserved as-is. Files from resource packs have no writable source, so this item is disabled for them. For the meaning of each meta, see the [KltytonScreen doc](kltytonui-screen#page-meta-configuration).
 
-**REFERENCE**: Generates reference code and copies it to the clipboard in one click — images get both CSS background and `<img>` snippets, fonts get `@font-face` registration + `font-family` usage, and HTML gets various opening methods such as Screen / Overlay / WorldWindow / KubeJS.
+**REFERENCE**: Generates reference code and copies it to the clipboard in one click — images get both CSS background and `<img>` snippets, fonts get `@font-face` registration + `font-family` usage, and HTML gets various opening methods such as Screen / Overlay / WorldWindow.
 
 ## Troubleshooting
 

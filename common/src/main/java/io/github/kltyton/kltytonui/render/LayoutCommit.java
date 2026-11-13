@@ -60,6 +60,15 @@ public final class LayoutCommit {
         commitFull(document, paintList);
     }
 
+    public static void commitNow(Document document) {
+        if (document == null || !document.isActive()) return;
+        List<RenderNode> paintList = document.getPaintList();
+        if (paintList == null || paintList.isEmpty()) return;
+        document.endInitialCommitSlice();
+        commitFull(document, paintList);
+        document.markHitTestDirtyAll();
+    }
+
     /**
      * 开关：首次全量提交分片。优先级：显式系统属性
      * {@code -Dkltytonui.layout.sliceInitialCommit}（调试/测试覆盖）> 配置服务

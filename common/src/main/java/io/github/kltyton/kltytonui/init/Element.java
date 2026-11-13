@@ -17,7 +17,7 @@ import io.github.kltyton.kltytonui.render.Rect;
 import io.github.kltyton.kltytonui.render.GeometryQueryScope;
 import io.github.kltyton.kltytonui.spi.KuiServices;
 import io.github.kltyton.kltytonui.style.*;
-import dev.latvian.mods.rhino.util.HideFromJS;
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -111,6 +111,7 @@ public class Element extends Node {
     // 会绕过 recomputeStyleSelf 的 observeStyle 失效链路（styleVersion/提交 Rect 等
     // 派生缓存不失效），导致元素永远停留在旧样式。
     private boolean cssCacheMatched = false;
+    private Style pendingPreviousStyle;
     public Element parentElement = null;
     public ArrayList<Element> children = new ArrayList<>();
     private static final HashMap<String, CSS.Declaration> EMPTY_DECLARATIONS = new HashMap<>();
@@ -135,6 +136,7 @@ public class Element extends Node {
     public boolean isPointerEnabled = true;
     public boolean isVisible = true;
     public String id = null;
+    @HideFromScript
     public String value = null;
     private boolean valueDirty = false;
     private Boolean checkedState = null;
@@ -194,9 +196,25 @@ public class Element extends Node {
      * 只负责清缓存 + 入队；真正的 CSS 计算在 tick 的 flushPendingStyleUpdates 中统一执行。
      */
     public final void invalidateStyle() {
+        capturePreviousStyle();
         invalidateStyleCaches();
         if (isConnected()) {
             requestStyleRecalc();
+        }
+    }
+
+    private void capturePreviousStyle() {
+        if (document != null && isConnected() && pendingPreviousStyle == null) {
+            Style previous = StyleFrameCache.get(this);
+            pendingPreviousStyle = previous != null ? previous : renderElement.computedStyle.get();
+        }
+    }
+
+    private void invalidateInlineStyle() {
+        capturePreviousStyle();
+        invalidateStyleCaches();
+        if (document != null && isConnected()) {
+            document.requestInlineStyleRecalc(this, pendingPreviousStyle != null);
         }
     }
 
@@ -218,8 +236,8 @@ public class Element extends Node {
         node.forEachRoute(consumer);
     }
 
-    private final Style inlineStyle = Style.createInlineDeclarationStyle(this);
-    private Style inlineStyleSnapshot = inlineStyle.clone();
+    private Style inlineStyle;
+    private Style inlineStyleSnapshot;
     private List<InlineStyleDeclaration.Entry> inlineDeclarations = new ArrayList<>();
     private boolean inlineStyleInitialized = false;
     private boolean inlineStyleSnapshotPending = false;
@@ -230,9 +248,20 @@ public class Element extends Node {
 
     public Style getStyle() {
         ensureInlineStyleInitialized();
+        Style style = inlineStyle();
+        if (inlineStyleSnapshot == null) inlineStyleSnapshot = style.clone();
         mutableInlineStyleExposed = true;
         if (document != null) document.trackMutableInlineStyle(this);
-        return inlineStyle;
+        return style;
+    }
+
+    private Style inlineStyle() {
+        Style style = inlineStyle;
+        if (style == null) {
+            style = Style.createInlineDeclarationStyle(this);
+            inlineStyle = style;
+        }
+        return style;
     }
 
     public ScriptStyleDeclaration getScriptStyleDeclaration() {
@@ -263,7 +292,7 @@ public class Element extends Node {
         boolean independentProperty = switch (property) {
             case "height", "order", "z-index", "color-scheme" -> true;
             // The legacy rotate shorthand also writes the transform field.
-            case "transform" -> normalizedValue.equals(inlineStyle.get(property));
+            case "transform" -> normalizedValue.equals(inlineStyle().get(property));
             default -> false;
         };
         if ((property.startsWith("--") || independentProperty) && !normalizedValue.isEmpty()) {
@@ -304,7 +333,8 @@ public class Element extends Node {
         if (value != null) return InlineStyleDeclaration.valueWithoutPriority(value);
         if (property.startsWith("--")) return "";
         ensureInlineStyleInitialized();
-        String expanded = inlineStyle.get(property);
+        Style style = inlineStyle;
+        String expanded = style == null ? null : style.get(property);
         return expanded == null || "unset".equalsIgnoreCase(expanded) ? "" : expanded;
     }
 
@@ -383,6 +413,8 @@ public class Element extends Node {
             } else if (!id.equals(attrId)) {
                 attributes.put("id", id);
                 requestStyleRecalc();
+                requestRelationalSelectorRecalc();
+                requestAttributeSelectorRecalc("id");
             }
             return attributes.get("id");
         }
@@ -392,6 +424,11 @@ public class Element extends Node {
 
     public void setAttribute(String name, String value) {
         String oldValue = attributes.get(name);
+        if ("style".equals(name) && attributes.containsKey(name) && Objects.equals(oldValue, value)
+                && inlineStyleInitialized && !inlineStyleSnapshotPending
+                && Objects.equals(oldValue, inlineStyleAttributeSnapshot)
+                && (!mutableInlineStyleExposed || inlineStyle.changesComparedTo(inlineStyleSnapshot).isEmpty())) return;
+        Element previousFormOwner = "form".equals(name) ? getFormOwner() : null;
         String oldId = "id".equals(name) ? id : null;
         attributes.put(name, value);
         if (name.equals("style")) {
@@ -419,15 +456,24 @@ public class Element extends Node {
         }
         // 统一在 tick 阶段刷新样式；此处只做失效与入队，避免事件回调里同步重算 CSS/布局。
         syncAttributeState(name);
-        invalidateStyle();
-        requestRelationalSelectorRecalc();
+        if ("style".equals(name)) invalidateInlineStyle();
+        else {
+            invalidateStyle();
+            requestRelationalSelectorRecalc();
+        }
+        if (name != null && !Objects.equals(oldValue, value)) {
+            requestAttributeSelectorRecalc(name);
+            if (previousFormOwner != null) previousFormOwner.requestFormValidityRecalc();
+        }
         if (document != null && name != null && !Objects.equals(oldValue, value)) {
+            invalidateTableSpan(name);
             document.queueMutation(Document.MutationRecord.attributes(this, name, oldValue));
         }
     }
 
     public void removeAttribute(String name) {
         String oldValue = attributes.get(name);
+        Element previousFormOwner = "form".equals(name) ? getFormOwner() : null;
         String oldId = "id".equals(name) ? id : null;
         attributes.remove(name);
         if (name.equals("style")) {
@@ -450,11 +496,26 @@ public class Element extends Node {
             classNames = Collections.emptySet();
         }
         syncAttributeState(name);
-        invalidateStyle();
-        requestRelationalSelectorRecalc();
+        if ("style".equals(name)) invalidateInlineStyle();
+        else {
+            invalidateStyle();
+            requestRelationalSelectorRecalc();
+        }
+        if (name != null && oldValue != null) {
+            requestAttributeSelectorRecalc(name);
+            if (previousFormOwner != null) previousFormOwner.requestFormValidityRecalc();
+        }
         if (document != null && name != null && oldValue != null) {
+            invalidateTableSpan(name);
             document.queueMutation(Document.MutationRecord.attributes(this, name, oldValue));
         }
+    }
+
+    private void invalidateTableSpan(String name) {
+        if ((!"colspan".equals(name) && !"rowspan".equals(name))
+                || (!"TD".equalsIgnoreCase(tagName) && !"TH".equalsIgnoreCase(tagName))) return;
+        getRenderer().invalidateLayoutAncestors();
+        document.markDirty(this, Drawer.RELAYOUT | Drawer.REPAINT | Drawer.HITTEST);
     }
 
     public boolean hasAttribute(String name) {
@@ -514,12 +575,65 @@ public class Element extends Node {
         }
     }
 
-    public boolean recomputeStyleSelf() {
-        Style originStyle = getComputedStyle();
+    private void requestValuePseudoRecalc() {
+        requestPseudoStyleRecalc("placeholder-shown");
+        requestValidityPseudoRecalc();
+    }
 
-        cssCache = pseudoElement
+    private void requestValidityPseudoRecalc() {
+        requestPseudoStyleRecalc("valid");
+        requestPseudoStyleRecalc("invalid");
+        requestPseudoStyleRecalc("in-range");
+        requestPseudoStyleRecalc("out-of-range");
+        Element owner = getFormOwner();
+        if (owner != null) owner.requestFormValidityRecalc();
+    }
+
+    private void requestFormValidityRecalc() {
+        requestPseudoStyleRecalc("valid");
+        requestPseudoStyleRecalc("invalid");
+    }
+
+    private Style lastInheritedStyle;
+    private boolean styleCommitted;
+    private boolean customPropertiesChangedOnRecalc;
+
+    /** Clears the resolved values that may depend on an ancestor's custom properties. */
+    @HideFromScript
+    public void invalidateInheritedCustomProperties() {
+        capturePreviousStyle();
+        invalidateStyleCaches();
+    }
+
+    @HideFromScript
+    public boolean customPropertiesChangedOnRecalc() {
+        return customPropertiesChangedOnRecalc;
+    }
+
+    public boolean recomputeStyleSelf() {
+        customPropertiesChangedOnRecalc = false;
+        Style cachedStyle = renderElement.computedStyle.get();
+        Style inheritedStyle = parentElement == null ? null : parentElement.getRawComputedStyle();
+        var matched = pseudoElement
                 ? Selector.matchPseudoElementCSS(pseudoElementHost, pseudoElementKind)
                 : Selector.matchCSS(this);
+        boolean inheritedChanged = inheritedStyle == null ? lastInheritedStyle != null
+                : lastInheritedStyle == null || inheritedStyle.affectsDescendantComputedStyleComparedTo(lastInheritedStyle);
+        if (pendingPreviousStyle == null && styleCommitted && cachedStyle != null
+                && !inheritedChanged && cssCache.equals(matched)) {
+            beforePseudoResolved = false;
+            afterPseudoResolved = false;
+            beforePseudoStyles = null;
+            afterPseudoStyles = null;
+            scrollbarPseudoStyles = null;
+            syncGeneratedPseudoElementsForStyleRecalc();
+            return false;
+        }
+        Style originStyle = pendingPreviousStyle;
+        pendingPreviousStyle = null;
+        if (originStyle == null) originStyle = getComputedStyle();
+
+        cssCache = matched;
         cssCacheMatched = true;
         invalidateStyleCaches();
 
@@ -531,7 +645,13 @@ public class Element extends Node {
         RenderElement.observeStyle(this, originStyle, currentStyle);
         Transition.create(this, originStyle, currentStyle);
         syncGeneratedPseudoElementsForStyleRecalc();
-        return currentStyle.affectsDescendantComputedStyleComparedTo(originStyle);
+        lastInheritedStyle = inheritedStyle;
+        styleCommitted = true;
+        boolean descendantsAffected = currentStyle.affectsDescendantComputedStyleComparedTo(originStyle);
+        if (descendantsAffected) {
+            customPropertiesChangedOnRecalc = !currentStyle.hasSameCustomProperties(originStyle);
+        }
+        return descendantsAffected;
     }
 
     /**
@@ -540,9 +660,16 @@ public class Element extends Node {
      * draw-time tint and must not clear text layout caches on every frame.
      */
     public void refreshInheritedStyleForMotion() {
+        Style previous = renderElement.computedStyle.get();
         renderElement.computedStyle.clear();
         StyleFrameCache.invalidate(this);
-        getRawComputedStyle();
+        Style current = getRawComputedStyle();
+        if (previous != null && !Objects.equals(previous.color, current.color)) {
+            renderElement.background.clear();
+            renderElement.maskLayers.clear();
+            renderElement.clearVisualBoxCache();
+            if (document != null) document.markDirty(this, Drawer.REPAINT);
+        }
     }
 
     public Style getComputedStyle() {
@@ -575,6 +702,7 @@ public class Element extends Node {
             renderElement.computedStyle.set(computedStyle);
             computedStyle.resolveVarReferences(this);
             computedStyle.finalizeComputedValues(this);
+            if (document != null) document.setHasAnimationSpec(this, Animation.hasAnimationSpec(computedStyle));
             isPointerEnabled = computedStyle.pointerEvents.equals("auto");
             isVisible = Interaction.isVisible(this);
         }
@@ -600,19 +728,25 @@ public class Element extends Node {
         updatingInlineStyle = true;
         try {
             String rawAttributeValue = attributes.get("style");
+            if (!inlineStyleInitialized && (rawAttributeValue == null || rawAttributeValue.isEmpty())) {
+                inlineStyleAttributeSnapshot = rawAttributeValue;
+                inlineStyleInitialized = true;
+                return;
+            }
             String attributeValue = rawAttributeValue == null ? "" : rawAttributeValue;
             inlineDeclarations = InlineStyleDeclaration.parseEntries(attributeValue);
+            Style style = inlineStyle();
             Style previousStyle = inlineStyleSnapshot;
-            Style newStyle = Style.createInlineDeclarationStyle();
+            if (inlineStyleInitialized && previousStyle == null) previousStyle = style.clone();
+            style.resetInlineDeclaration();
             // CSSOM 视图取“最后一条声明”（如 el.style.color），按声明顺序覆盖、不按重要性折叠。
             for (InlineStyleDeclaration.Entry entry : inlineDeclarations) {
-                newStyle.update(entry.property(), InlineStyleDeclaration.valueWithoutPriority(entry.value()));
+                style.update(entry.property(), InlineStyleDeclaration.valueWithoutPriority(entry.value()));
             }
-            inlineStyle.copyFrom(newStyle);
             if (inlineStyleInitialized && isConnected()) {
-                RenderElement.observeStyle(this, previousStyle, inlineStyle);
+                RenderElement.observeStyle(this, previousStyle, style);
             }
-            inlineStyleSnapshot = inlineStyle.clone();
+            inlineStyleSnapshot = style.clone();
             inlineStyleAttributeSnapshot = rawAttributeValue;
             inlineStyleInitialized = true;
             inlineStyleSnapshotPending = false;
@@ -638,7 +772,8 @@ public class Element extends Node {
         if (!Objects.equals(attributeValue, inlineStyleAttributeSnapshot)) {
             String oldValue = inlineStyleAttributeSnapshot;
             updateInlineStyle();
-            invalidateStyle();
+            invalidateInlineStyle();
+            requestAttributeSelectorRecalc("style");
             if (document != null) {
                 document.queueMutation(Document.MutationRecord.attributes(this, "style", oldValue));
             }
@@ -665,7 +800,10 @@ public class Element extends Node {
             inlineStyleAttributeSnapshot = serialized;
             inlineStyleSnapshotPending = true;
             if (mutableInlineStyleExposed) updateInlineStyle();
-            if (!Objects.equals(oldValue, serialized)) invalidateStyle();
+            if (!Objects.equals(oldValue, serialized)) {
+                invalidateInlineStyle();
+                requestAttributeSelectorRecalc("style");
+            }
             if (document != null && !Objects.equals(oldValue, serialized)) {
                 document.queueMutation(Document.MutationRecord.attributes(this, "style", oldValue));
             }
@@ -834,7 +972,7 @@ public class Element extends Node {
      * 查询 {@code ::-webkit-scrollbar*} 伪元素的声明集合（结果按宿主缓存）。
      * 未声明时返回空 Map，调用方据此回退到默认样式。
      */
-    @HideFromJS
+    @HideFromScript
     public HashMap<String, CSS.Declaration> getScrollbarPseudoStyles(Selector.PseudoElement kind) {
         if (kind == null || !kind.isScrollbar()) return EMPTY_DECLARATIONS;
         if (scrollbarPseudoStyles == null) scrollbarPseudoStyles = new java.util.HashMap<>();
@@ -850,7 +988,7 @@ public class Element extends Node {
     }
 
     /** Commits scroll extents from the element's used layout boxes. */
-    @HideFromJS
+    @HideFromScript
     public void commitScrollMetricsFromLayout() {
         scroll.commitLayoutMetrics();
     }
@@ -859,7 +997,7 @@ public class Element extends Node {
      * 几何提交路径专用：提交滚动条度量的同时，把"滚动条可见性变了"这个布局输入
      * 立刻失效掉。见 {@link ScrollModel#syncLayoutAfterMetricsCommit()}。
      */
-    @HideFromJS
+    @HideFromScript
     public void commitScrollMetricsAfterLayoutCommit() {
         scroll.commitLayoutMetrics();
         scroll.syncLayoutAfterMetricsCommit();
@@ -871,13 +1009,17 @@ public class Element extends Node {
 
     public void setDefaultValue(String value) {
         String normalized = value == null ? "" : value;
-        attributes.put("value", normalized);
+        String oldValue = attributes.put("value", normalized);
         if (!valueDirty || this.value == null) {
             this.value = normalized;
             getRenderer().text.clear();
             getRenderer().wrappedText.clear();
         }
         invalidateStyle();
+        if (!Objects.equals(oldValue, normalized)) {
+            requestRelationalSelectorRecalc();
+            requestAttributeSelectorRecalc("value");
+        }
     }
 
     public String getValue() {
@@ -897,8 +1039,10 @@ public class Element extends Node {
             boolean matched = false;
             for (Element option : getOptionChildren()) {
                 boolean selected = !matched && Objects.equals(normalized, option.getOptionValue());
+                boolean changed = option.isSelected() != selected;
                 option.selectedState = selected;
                 option.selectedDirty = true;
+                if (changed) option.requestPseudoStyleRecalc("checked");
                 matched |= selected;
             }
             this.value = normalized;
@@ -906,6 +1050,7 @@ public class Element extends Node {
             getRenderer().text.clear();
             getRenderer().wrappedText.clear();
             invalidateStyle();
+            requestValuePseudoRecalc();
             return;
         }
         this.value = normalized;
@@ -913,6 +1058,7 @@ public class Element extends Node {
         getRenderer().text.clear();
         getRenderer().wrappedText.clear();
         invalidateStyle();
+        requestValuePseudoRecalc();
     }
 
     public String getPlaceholder() {
@@ -1084,21 +1230,15 @@ public class Element extends Node {
         }
         if (changed) {
             invalidateStyle();
+            requestPseudoStyleRecalc("checked");
+            requestValidityPseudoRecalc();
             if (document != null && document.documentElement != null) {
                 requestCheckedScopeRecalc();
             }
         }
     }
 
-    /**
-     * 请求「该元素父节点子树」的样式重算。
-     * <p>
-     * 某元素自身的 :checked 变化，只可能影响它自己、它的后代，以及它后面的兄弟及其后代——
-     * 也就是它父节点的子树之内：组合器（+ / ~）只向后看，不会波及前面的兄弟；
-     * 选择器不支持 :has，也不会波及祖先。因此父节点子树是完整且最小的覆盖范围，
-     * 无需再退化成整棵文档树（例如 input:checked ~ main .panel 这类规则，.panel 一定在父节点子树内）。
-     * 元素本身就是 documentElement（没有父节点）时，退回整棵文档树。
-     */
+    /** Refreshes siblings affected by a checked-state change. */
     private void requestCheckedScopeRecalc() {
         if (document == null) return;
         Element scope = parentElement != null ? parentElement : document.documentElement;
@@ -1125,18 +1265,25 @@ public class Element extends Node {
     }
 
     public void setSelected(boolean selected) {
+        boolean changed = isSelected() != selected;
         selectedState = selected;
         selectedDirty = true;
         Element select = getOwnerSelect();
         if (select != null) {
             if (selected && !select.isMultiple()) {
                 for (Element option : select.getOptionChildren()) {
-                    if (option != this) option.selectedState = false;
+                    if (option != this) {
+                        boolean wasSelected = option.isSelected();
+                        option.selectedState = false;
+                        if (wasSelected) option.requestPseudoStyleRecalc("checked");
+                    }
                 }
             }
             select.invalidateSelectPresentation();
         }
         invalidateStyle();
+        if (changed) requestPseudoStyleRecalc("checked");
+        if (select != null) select.requestValuePseudoRecalc();
     }
 
     public boolean isDefaultSelected() {
@@ -1170,10 +1317,14 @@ public class Element extends Node {
         List<Element> options = getOptionChildren();
         for (int i = 0; i < options.size(); i++) {
             Element option = options.get(i);
-            option.selectedState = i == index && index >= 0 && index < options.size();
+            boolean selected = i == index && index >= 0 && index < options.size();
+            boolean changed = option.isSelected() != selected;
+            option.selectedState = selected;
             option.selectedDirty = true;
+            if (changed) option.requestPseudoStyleRecalc("checked");
         }
         invalidateSelectPresentation();
+        requestValuePseudoRecalc();
     }
 
     public void drawPhase(PoseStack poseStack, Base.RenderPhase phase) {
@@ -1209,38 +1360,38 @@ public class Element extends Node {
     }
 
     /** Draws the element's outline after its descendants and outside its content clip. */
-    @HideFromJS
+    @HideFromScript
     public void drawOutlineOnly(PoseStack poseStack) {
         Rect.of(this).drawOutline(poseStack);
     }
 
     /** Draw this element's native scrollbars after its content clip has been popped. */
-    @HideFromJS
+    @HideFromScript
     public void drawScrollbar(PoseStack poseStack, Rect rectRenderer) {
         scroll.drawScrollbar(poseStack, rectRenderer);
     }
 
-    @HideFromJS
+    @HideFromScript
     public boolean mayRenderScrollbar() {
         return scroll.mayRenderScrollbar();
     }
 
-    @HideFromJS
+    @HideFromScript
     public boolean handleScrollbarMouseDown(io.github.kltyton.kltytonui.event.MouseEvent event) {
         return scroll.handleMouseDown(event);
     }
 
-    @HideFromJS
+    @HideFromScript
     public boolean handleScrollbarMouseMove(io.github.kltyton.kltytonui.event.MouseEvent event) {
         return scroll.handleMouseMove(event);
     }
 
-    @HideFromJS
+    @HideFromScript
     public boolean handleScrollbarMouseUp(io.github.kltyton.kltytonui.event.MouseEvent event) {
         return scroll.handleMouseUp(event);
     }
 
-    @HideFromJS
+    @HideFromScript
     public boolean isScrollbarInteractionActive() {
         return scroll.isScrollbarInteractionActive();
     }
@@ -1330,7 +1481,30 @@ public class Element extends Node {
         }
     }
 
-    @HideFromJS
+    private void requestAttributeSelectorRecalc(String name) {
+        if (document == null || !isConnected()) return;
+        switch (document.getSelectorIndex().attributeRecalcScope(name)) {
+            case PARENT_SUBTREE -> document.requestStyleRecalc(parentElement == null ? this : parentElement);
+            case DOCUMENT -> {
+                Element root = document.documentElement != null ? document.documentElement : document.body;
+                if (root != null) document.requestStyleRecalc(root);
+            }
+            case SUBTREE -> document.requestStyleRecalc(this);
+            case NONE, SELF -> {
+            }
+        }
+        switch (name.toLowerCase(Locale.ROOT)) {
+            case "disabled", "readonly", "type", "required", "multiple", "value", "min", "max",
+                    "step", "pattern", "minlength", "maxlength", "name", "form", "checked" -> requestValidityPseudoRecalc();
+            default -> { }
+        }
+        if ("OPTION".equalsIgnoreCase(tagName) && ("selected".equalsIgnoreCase(name) || "value".equalsIgnoreCase(name))) {
+            Element select = getOwnerSelect();
+            if (select != null) select.requestValuePseudoRecalc();
+        }
+    }
+
+    @HideFromScript
     public void setScrollTopImmediateForTesting(double value) {
         scroll.setScrollTopImmediateForTesting(value);
     }
@@ -1381,7 +1555,7 @@ public class Element extends Node {
                     element.EventListener.add(eventListener);
                 }
             }
-            origin.document.updateElement(element);
+            origin.document.getTree().updateInitializedElement(origin, element);
 
             element.runInitFromDomOnce(origin);
 
@@ -1435,7 +1609,7 @@ public class Element extends Node {
         return node.removeChild(element);
     }
 
-    @HideFromJS
+    @HideFromScript
     public Element insertBefore(Element newElement, Element referenceElement) {
         return node.insertBefore(newElement, referenceElement);
     }
@@ -1652,8 +1826,13 @@ public class Element extends Node {
         if (document != null) {
             document.setHasAnimationSpec(this, Animation.hasAnimationSpec(style));
         }
-        int pseudoMask = RenderElement.observeStyleMask(this, originStyle, style);
         Transition.create(this, originStyle, style);
+        boolean originOutOfFlow = "absolute".equals(originStyle.position) || "fixed".equals(originStyle.position);
+        boolean currentOutOfFlow = "absolute".equals(style.position) || "fixed".equals(style.position);
+        boolean deferOutOfFlowMotion = originOutOfFlow && currentOutOfFlow
+                && java.util.Objects.equals(originStyle.display, style.display)
+                && (Transition.isActive(this) || Animation.hasAnimationSpec(style));
+        int pseudoMask = RenderElement.observeStyleMask(this, originStyle, style, deferOutOfFlowMotion);
         pseudoElementPreviousStyle = style.clone();
         innerText = CssString.parsePseudoContentText(style.content);
         // 伪元素文本参与父级单元的扁平文本，内容变化时选择缓存随之失效
@@ -1664,7 +1843,7 @@ public class Element extends Node {
         // 一模一样的结果"不算变化。原来无条件失效，导致任何让宿主子树重算样式的操作（例如拖动
         // 流程图画布时每帧写一次 transform）都会把带 ::before/::after 的节点整片标成 RELAYOUT，
         // 每帧退化成全文档 LayoutCommit.commit —— 拖拽掉帧的根因。
-        if (pseudoBoxChanged(originStyle, style, pseudoMask)) {
+        if (pseudoBoxChanged(originStyle, style, pseudoMask, deferOutOfFlowMotion)) {
             invalidatePseudoElementHostLayout();
         }
     }
@@ -1677,7 +1856,9 @@ public class Element extends Node {
      * 会改变伪元素盒子的尺寸；content 变化也会。剩下那些只影响外观的差异（颜色、背景、阴影）
      * 由伪元素自己 REPAINT 就够了，不该把宿主整片拉进重排。</p>
      */
-    private static boolean pseudoBoxChanged(Style origin, Style current, int pseudoMask) {
+    private static boolean pseudoBoxChanged(Style origin, Style current, int pseudoMask,
+                                            boolean deferredOutOfFlowMotion) {
+        if (deferredOutOfFlowMotion) return false;
         if ((pseudoMask & (Drawer.RELAYOUT | Drawer.REORDER)) != 0) return true;
         if (!java.util.Objects.equals(origin.content, current.content)) return true;
         for (String property : PSEUDO_BOX_PROPS) {
@@ -1822,8 +2003,13 @@ public class Element extends Node {
         StringBuilder builder = new StringBuilder();
         for (Node child : childNodes) {
             if (child == null) continue;
-            String text = child.getTextContent();
-            if (text != null) builder.append(text);
+            /* DOM 规范：element.textContent 只由后代 **Text 节点**的数据拼成，注释不参与。
+               注释自己的 textContent 仍是它的数据（见 CommentNode#getTextContent）——
+               这正是浏览器里 `<div><!--x-->hi</div>`.textContent === "hi" 的原因。 */
+            if (child instanceof TextNode || child instanceof Element) {
+                String text = child.getTextContent();
+                if (text != null) builder.append(text);
+            }
         }
         return builder.toString();
     }
@@ -1885,12 +2071,7 @@ public class Element extends Node {
             // Text contributes intrinsic size. Its ancestors and following siblings
             // therefore need the same layout invalidation as a normal-flow resize.
             getRenderer().invalidateLayoutSubtree();
-            forEachRoute(element -> {
-                RenderElement renderer = element.getRenderer();
-                renderer.invalidateLayoutVersion();
-                renderer.size.clear();
-                renderer.box.clear();
-            });
+            getRenderer().invalidateLayoutAncestors();
             if (parentElement != null) {
                 parentElement.children.forEach(sibling -> sibling.getRenderer().position.clear());
             }
@@ -1961,9 +2142,14 @@ public class Element extends Node {
     }
 
     public void setInnerHTML(String html) {
-        ArrayList<Node> snapshot = new ArrayList<>(childNodes);
-        for (Node child : snapshot) {
-            removeChild(child);
+        boolean batch = document != null && isConnected()
+                && !"SLOT".equalsIgnoreCase(tagName) && !"INGREDIENT".equalsIgnoreCase(tagName)
+                && KuiServices.expander().supportsInnerHtmlBatch(document, this);
+        if (batch) {
+            clearChildren();
+        } else {
+            ArrayList<Node> snapshot = new ArrayList<>(childNodes);
+            for (Node child : snapshot) removeChild(child);
         }
         innerText = "";
         if (document != null) document.bumpSelectionCache();
@@ -1974,8 +2160,12 @@ public class Element extends Node {
         if (wrapper == null) return;
 
         ArrayList<Node> newChildren = new ArrayList<>(wrapper.childNodes);
-        for (Node child : newChildren) {
-            appendChild(child);
+        if (batch) {
+            io.github.kltyton.kltytonui.dom.DocumentFragment fragment = document.createDocumentFragment();
+            for (Node child : newChildren) fragment.appendChild(child);
+            if (!fragment.childNodes.isEmpty()) appendChild(fragment);
+        } else {
+            for (Node child : newChildren) appendChild(child);
         }
     }
 
@@ -2012,6 +2202,34 @@ public class Element extends Node {
 
     public void setClassName(String value) {
         setAttribute("class", value == null ? "" : value);
+    }
+
+    /**
+     * {@code rel} / {@code href}：浏览器里 {@code <link>}、{@code <a>}、{@code <area>}、{@code <base>}
+     * 的**反射属性**。页面脚本写 {@code link.rel = 'stylesheet'} / {@code link.href = 'x.css'} 时，
+     * 属性读写通过这两个 bean 访问器与 DOM 属性保持同步。
+     *
+     * <p>刻意放在 {@code Element} 上，而不是给 {@code <link>} 注册一个元素子类：子类升级会换掉实例
+     * （{@code Element.init}），页面在把元素插进 DOM **之前**注册的 {@code load} / {@code error} 监听
+     * 就会挂在旧实例上、永远收不到事件——预览台正是这种写法。值按原属性给，不做绝对 URL 解析，
+     * 保证 {@code el.href} 与 {@code el.getAttribute('href')} 一致。</p>
+     */
+    public String getRel() {
+        String value = getAttribute("rel");
+        return value == null ? "" : value;
+    }
+
+    public void setRel(String value) {
+        setAttribute("rel", value == null ? "" : value);
+    }
+
+    public String getHref() {
+        String value = getAttribute("href");
+        return value == null ? "" : value;
+    }
+
+    public void setHref(String value) {
+        setAttribute("href", value == null ? "" : value);
     }
 
     public DOMTokenList getClassList() {
@@ -2265,6 +2483,7 @@ public class Element extends Node {
     public void setCustomValidity(String message) {
         customValidityMessage = message == null ? "" : message;
         invalidateStyle();
+        requestValidityPseudoRecalc();
     }
 
     public String getValidationMessage() {
@@ -2375,6 +2594,7 @@ public class Element extends Node {
     private void resetFormControl() {
         if ("INPUT".equalsIgnoreCase(tagName) || "TEXTAREA".equalsIgnoreCase(tagName)) {
             restoreFormValue(getDefaultValue());
+            requestValuePseudoRecalc();
         }
         if ("INPUT".equalsIgnoreCase(tagName) && "file".equals(ConstraintText.normalizedInputType(this))) {
             fileList.clear();
@@ -2386,11 +2606,14 @@ public class Element extends Node {
             checkedState = isDefaultChecked();
             checkedDirty = false;
             invalidateStyle();
+            requestPseudoStyleRecalc("checked");
+            requestValidityPseudoRecalc();
         }
         if ("OPTION".equalsIgnoreCase(tagName)) {
             selectedState = isDefaultSelected();
             selectedDirty = false;
             invalidateStyle();
+            requestPseudoStyleRecalc("checked");
         }
         if ("SELECT".equalsIgnoreCase(tagName)) {
             for (Element option : getOptionChildren()) {
@@ -2399,6 +2622,8 @@ public class Element extends Node {
             }
             normalizeSelectSelection(true);
             invalidateSelectPresentation();
+            for (Element option : getOptionChildren()) option.requestPseudoStyleRecalc("checked");
+            requestValuePseudoRecalc();
         }
     }
 
@@ -2463,26 +2688,41 @@ public class Element extends Node {
      * {@code clientWidth/clientHeight} 把整棵树缩放进视口。
      */
     public double getClientWidth() {
-        Box box = Box.of(this);
-        return Math.max(0, box.innerSize().width() + box.getPaddingHorizontal());
+        try (GeometryQueryScope geometryScope = GeometryQueryScope.open()) {
+            Box box = Box.of(this);
+            return Math.max(0, box.innerSize().width() + box.getPaddingHorizontal());
+        }
     }
 
     public double getClientHeight() {
-        Box box = Box.of(this);
-        return Math.max(0, box.innerSize().height() + box.getPaddingVertical());
+        try (GeometryQueryScope geometryScope = GeometryQueryScope.open()) {
+            Box box = Box.of(this);
+            return Math.max(0, box.innerSize().height() + box.getPaddingVertical());
+        }
     }
 
     /** CSSOM View §7.2：border box 尺寸。与浏览器一致，不受 transform 影响。 */
     public double getOffsetWidth() {
-        return Math.max(0, Box.of(this).elementSize().width());
+        try (GeometryQueryScope geometryScope = GeometryQueryScope.open()) {
+            return Math.max(0, Box.of(this).elementSize().width());
+        }
     }
 
     public double getOffsetHeight() {
-        return Math.max(0, Box.of(this).elementSize().height());
+        try (GeometryQueryScope geometryScope = GeometryQueryScope.open()) {
+            return Math.max(0, Box.of(this).elementSize().height());
+        }
     }
 
     public DOMRect getBoundingClientRect() {
         try (GeometryQueryScope geometryScope = GeometryQueryScope.open()) {
+            for (Element current = this; current != null; current = current.parentElement) {
+                current.syncLegacyInlineStyleMutations();
+                Style currentStyle = StyleFrameCache.get(current);
+                if (currentStyle == null) currentStyle = current.renderElement.computedStyle.get();
+                if (currentStyle == null) currentStyle = current.getComputedStyle();
+                if (currentStyle.isDisplayNone()) return new DOMRect(0, 0, 0, 0);
+            }
             Rect rect = Rect.of(this);
             Box box = rect.box;
             double x = rect.position.x + box.getMarginLeft();
@@ -2729,7 +2969,7 @@ public class Element extends Node {
         document.removeElement(this);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void handleTextSelectionMouseDownDefault(io.github.kltyton.kltytonui.event.MouseEvent event) {
         textSelection.handleMouseDownDefault(event);
     }
@@ -2768,8 +3008,11 @@ public class Element extends Node {
     }
 
     protected final void setRawBooleanAttribute(String name, boolean enabled) {
-        if (enabled) attributes.put(name, "");
-        else attributes.remove(name);
+        String oldValue = enabled ? attributes.put(name, "") : attributes.remove(name);
+        if (!Objects.equals(oldValue, enabled ? "" : null)) {
+            requestRelationalSelectorRecalc();
+            requestAttributeSelectorRecalc(name);
+        }
     }
 
     private List<Element> getOptionChildren() {
@@ -2962,6 +3205,7 @@ public class Element extends Node {
     }
 
     public void invalidateSubtreeAfterAttach() {
+        pendingPreviousStyle = null;
         invalidateStyleCaches();
         renderElement.route.clear();
         renderElement.transform.clear();
@@ -3024,6 +3268,8 @@ public class Element extends Node {
             // 需要重算；invalidateStyle() 只覆盖它自己的子树，覆盖不到兄弟。
             // 各 radio 可能散布在文档不同位置，所以按各自的父节点请求。
             element.requestCheckedScopeRecalc();
+            element.requestPseudoStyleRecalc("checked");
+            element.requestValidityPseudoRecalc();
         }
     }
 
@@ -3323,8 +3569,8 @@ public class Element extends Node {
         List<Node> renderChildNodes = getRenderChildNodes();
         if (renderChildNodes.isEmpty()) return;
         if (this instanceof io.github.kltyton.kltytonui.element.AbstractText) return;
-        if (getComputedStyle().isFlexDisplay()) {
-            drawFlexDirectTextRuns(poseStack);
+        if (getComputedStyle().isFlexDisplay() || getComputedStyle().isGridDisplay()) {
+            drawDirectLayoutTextRuns(poseStack);
             return;
         }
         if (getRenderChildren().isEmpty()) {
@@ -3334,7 +3580,6 @@ public class Element extends Node {
                 }
             }
         }
-        if (getComputedStyle().isGridDisplay()) return;
         Position contentPos = rectRenderer.getContentPosition();
         boolean alignDirectTextRuns = shouldAlignDirectNormalFlowTextRuns();
         double contentWidth = alignDirectTextRuns ? Box.of(this).innerSize().width() : 0;
@@ -3480,7 +3725,7 @@ public class Element extends Node {
         );
     }
 
-    private void drawFlexDirectTextRuns(PoseStack poseStack) {
+    private void drawDirectLayoutTextRuns(PoseStack poseStack) {
         int[] selectionRange = (document != null && document.getDocumentSelection().isActive()
                 && SelectionUnits.isSelectionUnit(this))
                 ? document.getDocumentSelection().localRangeForUnit(this)
@@ -3488,12 +3733,12 @@ public class Element extends Node {
         List<String> fragments = selectionRange == null ? null : SelectionUnits.flexTextFragments(this);
         int fragmentIndex = 0;
         int accumulatedBase = 0;
-        for (Flex.DirectTextLayout layout : Flex.computeDirectTextLayouts(this)) {
+        for (Layout.DirectTextLayout layout : Layout.computeDirectTextLayouts(this)) {
             if (layout == null || layout.text() == null || layout.position() == null) continue;
             Text text = layout.text();
             if (text.content == null || text.content.isEmpty()) continue;
             int currentColor = Text.getFontColor(this);
-            Position paintPos = getFlexDirectTextPaintPosition(layout);
+            Position paintPos = getDirectLayoutTextPaintPosition(layout);
             List<String> lines = layout.lines();
             int[] starts = layout.lineStarts();
             if (selectionRange == null || fragments == null) {
@@ -3554,7 +3799,7 @@ public class Element extends Node {
         return copy;
     }
 
-    Position getFlexDirectTextPaintPosition(Flex.DirectTextLayout layout) {
+    Position getDirectLayoutTextPaintPosition(Layout.DirectTextLayout layout) {
         // 与 Rect（背景/边框）保持一致：绘制坐标以 forRender（跨过祖先 margin）为基准，
         // 否则 flex 直接文本会相对元素盒整体上移祖先 margin 之和。
         Position origin = Position.forRender(this);

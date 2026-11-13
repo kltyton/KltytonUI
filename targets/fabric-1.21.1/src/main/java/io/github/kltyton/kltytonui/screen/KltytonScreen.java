@@ -61,12 +61,11 @@ public class KltytonScreen extends Screen implements KuiLinkedScreen {
     protected void init() {
         super.init();
 
-        if (linkedDocument != null) {
-            linkedDocument.remove();
-            linkedDocument = null;
+        if (linkedDocument == null || linkedDocument.isDisposed()) {
+            if (linkedDocument != null) io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
+            linkedDocument = Document.createForScreen(templatePath);
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.attach(linkedDocument);
         }
-
-        linkedDocument = Document.create(templatePath);
         if (linkedDocument != null) {
             linkedDocument.applyViewport(false);
         }
@@ -172,6 +171,7 @@ public class KltytonScreen extends Screen implements KuiLinkedScreen {
                 Event.triggerSingle(new Event(linkedDocument.body, "unload", false));
             }
             linkedDocument.remove();
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
         }
         Size.clearViewportOverride();
         Cursor.resetToDefault();
@@ -182,6 +182,8 @@ public class KltytonScreen extends Screen implements KuiLinkedScreen {
     public void removed() {
         if (linkedDocument != null) {
             linkedDocument.remove();
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
+            linkedDocument = null;
         }
         Size.clearViewportOverride();
         super.removed();

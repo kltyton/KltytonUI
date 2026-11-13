@@ -1,6 +1,8 @@
 package io.github.kltyton.kltytonui.dom;
 
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 import io.github.kltyton.kltytonui.init.Document;
 
@@ -28,6 +30,11 @@ public final class MutationObserverManager {
 
     public void remove(Document.MutationObserver observer) {
         observers.remove(observer);
+    }
+
+    @HideFromScript
+    public List<Document.MutationObserver> snapshotObservers() {
+        return List.copyOf(observers);
     }
 
     public void queue(Document.MutationRecord record) {

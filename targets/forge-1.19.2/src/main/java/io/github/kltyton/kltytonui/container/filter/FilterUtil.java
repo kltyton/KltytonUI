@@ -1,6 +1,5 @@
 package io.github.kltyton.kltytonui.container.filter;
 
-import io.github.kltyton.kltytonui.registry.annotation.KJSBindings;
 // 1.19.2 还没有 net.minecraft.core.registries.Registries，物品注册表的 ResourceKey
 // 挂在 Registry.ITEM_REGISTRY 上（1.19.3 起才挪到 Registries.ITEM）。
 import net.minecraft.core.Registry;
@@ -16,7 +15,6 @@ import java.util.function.Predicate;
  * ItemStack 放入过滤器。
  */
 @FunctionalInterface
-@KJSBindings(value = "FilterUtil")
 public interface FilterUtil extends ItemFilter<ItemStack>, io.github.kltyton.kltytonui.spi.KuiBindingFilter {
     FilterUtil ANY = stack -> true;
     FilterUtil NONE = stack -> false;

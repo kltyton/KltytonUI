@@ -21,7 +21,7 @@ public abstract class AbstractContainerScreenMixin {
 
     @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
     private void kltytonui$cancelVanillaRenderSlot(GuiGraphics guiGraphics, Slot slot, CallbackInfo ci) {
-        if ((Object) this instanceof KltytonContainerScreen screen) {
+        if ((Object) this instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             if (screen.pruneInvalidQuickCraftSlot(slot)) {
                 kltytonui$recalculateQuickCraftRemaining();
             }
@@ -31,7 +31,7 @@ public abstract class AbstractContainerScreenMixin {
 
     @Inject(method = "renderSlotHighlight(Lnet/minecraft/client/gui/GuiGraphics;III)V", at = @At("HEAD"), cancellable = true)
     private static void kltytonui$cancelVanillaSlotHighlightLegacy(CallbackInfo ci) {
-        if (Minecraft.getInstance().screen instanceof KltytonContainerScreen) {
+        if (Minecraft.getInstance().screen instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             ci.cancel();
         }
     }
@@ -49,7 +49,7 @@ public abstract class AbstractContainerScreenMixin {
             String overlayText,
             CallbackInfo ci
     ) {
-        if ((Object) this instanceof KltytonContainerScreen screen) {
+        if ((Object) this instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             screen.captureFloatingItem(stack, x, y, overlayText);
             ci.cancel();
         }
@@ -57,7 +57,7 @@ public abstract class AbstractContainerScreenMixin {
 
     @Inject(method = "isHovering(Lnet/minecraft/world/inventory/Slot;DD)Z", at = @At("HEAD"), cancellable = true)
     private void kltytonui$injectSlotHovering(Slot slot, double mouseX, double mouseY, CallbackInfoReturnable<Boolean> cir) {
-        if (!((Object) this instanceof KltytonContainerScreen screen)) {
+        if (!((Object) this instanceof KltytonContainerScreen<?> screen) || !screen.usesKltytonMenu()) {
             return;
         }
         if (!screen.isSlotPointerInteractable(slot)) {

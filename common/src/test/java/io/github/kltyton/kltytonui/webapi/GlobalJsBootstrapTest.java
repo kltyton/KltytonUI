@@ -114,7 +114,7 @@ class GlobalJsBootstrapTest {
         assertTrue(script.contains("function __auiDecorateIntersectionEntries(list)"));
         assertTrue(script.contains("function IntersectionObserverEntry(init)"));
         assertTrue(script.contains("function IntersectionObserver(callback, options)"));
-        assertTrue(script.contains("window.createIntersectionObserver(window.createCallback(function(entries)"));
+        assertTrue(script.contains("window.createIntersectionObserver(window.createCallback(callbackFunction)"));
         assertTrue(script.contains("IntersectionObserver root must be an Element, Document, or null"));
         assertTrue(script.contains("takeRecords: function()"));
         assertTrue(script.contains("__auiDecorateIntersectionEntries(this.__auiNativeObserver.takeRecords())"));
@@ -161,11 +161,11 @@ class GlobalJsBootstrapTest {
                 + " observer.trackVisibility, callbackThis === observer, callbackObserver === observer,"
                 + " callbackEntry instanceof IntersectionObserverEntry, callbackEntry.isVisible, badMargin].join('|');";
 
-        dev.latvian.mods.rhino.Context context = RhinoTestSupport.enterContext();
-        dev.latvian.mods.rhino.Scriptable scope = context.initStandardObjects();
-        Object result = context.evaluateString(scope, script, "intersection-observer-bootstrap", 1, null);
-
-        assertEquals("true|true|1in|2px|96px 96px 96px 96px|2px 2px 2px 2px|100|true|true|true|true|true|true", result);
+        try (var engine = dev.mooner.neonjs.NeonEngine.builder().build();
+             var context = engine.newContext()) {
+            String result = context.eval(script, "intersection-observer-bootstrap").asString();
+            assertEquals("true|true|1in|2px|96px 96px 96px 96px|2px 2px 2px 2px|100|true|true|true|true|true|true", result);
+        }
     }
 
     private static String globalFunction(String name) {

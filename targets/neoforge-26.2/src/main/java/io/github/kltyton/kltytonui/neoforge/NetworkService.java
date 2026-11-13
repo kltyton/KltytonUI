@@ -26,7 +26,7 @@ public final class NetworkService implements KuiNetworkService {
     }
 
     /**
-     * Concrete Forge-side adapter exposed to KubeJS/Rhino instead of a synthetic
+     * Concrete Forge-side adapter exposed to scripts instead of a synthetic
      * lambda class. The common SPI remains loader-neutral.
      */
     public static final class PendingMenuAdapter implements KuiPendingMenu {

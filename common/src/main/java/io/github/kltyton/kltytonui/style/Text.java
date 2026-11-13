@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.style;
 
 import io.github.kltyton.kltytonui.element.AbstractText;
+import io.github.kltyton.kltytonui.element.Model;
 import io.github.kltyton.kltytonui.element.Translation;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
@@ -76,7 +77,8 @@ public class Text {
 
     /** Resolves and measures the concrete fonts referenced by a stylesheet. */
     public static void warmUpFontFamily(String fontFamily) {
-        if (fontFamily == null || fontFamily.isBlank() || fontFamily.contains("var(")) return;
+        if (fontFamily == null || fontFamily.isBlank() || fontFamily.contains("var(")
+                || ShorthandParser.isCssWideKeyword(fontFamily)) return;
         String sample = "KUI \u4e2d\u6587";
         List<Font.FontRun> runs = Font.planFontRuns(
                 fontFamily,
@@ -112,6 +114,11 @@ public class Text {
     public String whiteSpace = "normal";
     public String wordBreak = "normal";
     public String overflowWrap = "normal";
+    /**
+     * 文档 meta {@code kui-hyphen-break}：false 时 '-' / '‐' 不再作为首选换行机会。
+     * 只影响标准的连字符断行，不影响空白、CJK 与 {@code break-all} 的断行。
+     */
+    public boolean hyphenBreak = true;
     public double textIndent = 0;
     public double letterSpacing = 0;
     // 字体渲染固定为 web 模式：默认字号 16px，缩放基准 9px（即字号即实际渲染像素）。
@@ -386,8 +393,15 @@ public class Text {
 
     public static Text of(Element element) {
         boolean naturalMeasurement = Size.isNaturalMeasurementContext();
-        Text cache = naturalMeasurement ? null : element.getRenderer().text.get();
-        if (cache != null) return cache;
+        var storage = naturalMeasurement ? element.getRenderer().naturalText : element.getRenderer().text;
+        Text cache = storage.get();
+        if (cache != null) {
+            if (naturalMeasurement) {
+                cache.textIndent = getTextIndent(element);
+                measureSize(element, cache);
+            }
+            return cache;
+        }
         Text text = new Text();
         text.owner = element;
         text.content = resolveElementTextContent(element);
@@ -427,6 +441,7 @@ public class Text {
             if (element.tagName.equals("PRE")) text.whiteSpace = "pre";
             else if (element.tagName.equals("TEXTAREA")) text.whiteSpace = "pre-wrap";
         }
+        text.hyphenBreak = element.document == null || element.document.allowsHyphenBreak();
         if (!(element instanceof AbstractText)) {
             text.content = normalizeWhiteSpaceContent(text.content, text.whiteSpace);
         }
@@ -434,9 +449,7 @@ public class Text {
         if (text.lineHeight == -1) text.lineHeight = calculateLineHeight(text, state.lineHeightRaw);
         text.size = measureSize(element, text);
 
-        if (!naturalMeasurement) {
-            element.getRenderer().text.set(text);
-        }
+        storage.set(text);
         return text;
     }
 
@@ -738,6 +751,7 @@ public class Text {
 
     static String resolveElementTextContent(Element element) {
         if (element == null) return "";
+        if (element instanceof Model) return "";
         if (element instanceof Translation translation) return translation.getTranslatedText();
         if (element.childNodes.isEmpty()) return element.innerText == null ? "" : element.innerText;
         if (element.childNodes.size() == 1 && element.childNodes.get(0) instanceof TextNode textNode) {
@@ -1288,6 +1302,7 @@ public class Text {
         h = 31 * h + (text.whiteSpace == null ? 0 : text.whiteSpace.hashCode());
         h = 31 * h + (text.wordBreak == null ? 0 : text.wordBreak.hashCode());
         h = 31 * h + (text.overflowWrap == null ? 0 : text.overflowWrap.hashCode());
+        h = 31 * h + (text.hyphenBreak ? 1 : 0);
         h = 31 * h + (text.direction == null ? 0 : text.direction.hashCode());
         h = 31 * h + (int) Math.round(text.textIndent * 1000);
         h = 31 * h + (int) Math.round(text.letterSpacing * 1000);
@@ -1295,7 +1310,51 @@ public class Text {
         return h;
     }
 
+    public static double minContentWidth(Text text) {
+        if (text == null) return 0;
+        return minContentWrap(text).width();
+    }
+
+    private static WrappedText minContentWrap(Text text) {
+        if (text == null) return new WrappedText(List.of(""), new int[]{0}, 0);
+        String content = text == null || text.content == null ? "" : text.content;
+        List<String> lines = new ArrayList<>();
+        List<Integer> starts = new ArrayList<>();
+        double width = 0;
+        int base = 0;
+        for (String line : splitLines(content)) {
+            int start = 0;
+            for (int i = 0; i < line.length();) {
+                int cp = line.codePointAt(i), end = i + Character.charCount(cp);
+                if (allowsSoftWrap(text.whiteSpace) && (isPreferredBreakChar(text, line.charAt(i)) || isBreakAllOpportunity(text, cp))) {
+                    int finish = consumesBreakChar(text.whiteSpace, line.charAt(i)) ? i : end;
+                    String segment = line.substring(start, finish);
+                    if (!segment.isEmpty()) {
+                        lines.add(segment);
+                        starts.add(base + start);
+                        width = Math.max(width, measureLine(text, segment));
+                    }
+                    start = end;
+                }
+                i = end;
+            }
+            if (start < line.length() || line.isEmpty()) {
+                String segment = line.substring(start);
+                lines.add(segment);
+                starts.add(base + start);
+                width = Math.max(width, measureLine(text, segment));
+            }
+            base += line.length() + 1;
+        }
+        if (lines.isEmpty()) {
+            lines.add("");
+            starts.add(0);
+        }
+        return new WrappedText(List.copyOf(lines), starts.stream().mapToInt(Integer::intValue).toArray(), width);
+    }
+
     public static WrappedText wrap(Text text, double wrapWidth) {
+        if (Size.isMinContentMeasurementContext()) return minContentWrap(text);
         String content = text == null || text.content == null ? "" : text.content;
         List<String> hardLines = splitLines(content);
         List<String> lines = new ArrayList<>();
@@ -1411,7 +1470,9 @@ public class Text {
         // CSS normal line breaking permits a break after a visible hyphen.  Keep
         // the character on the preceding line; unlike a collapsed space it is
         // part of the rendered text.
-        return whitespaceBreak || isHyphenBreakOpportunity(c) || isCjkBreakOpportunity(wordBreak, c);
+        boolean allowsHyphenBreak = text == null || text.hyphenBreak;
+        return whitespaceBreak || (allowsHyphenBreak && isHyphenBreakOpportunity(c))
+                || isCjkBreakOpportunity(wordBreak, c);
     }
 
     private static boolean isCjkBreakOpportunity(String wordBreak, char c) {
@@ -1468,6 +1529,15 @@ public class Text {
         if (element == null || text == null || !allowsSoftWrap(text.whiteSpace)) return 0;
         if (element instanceof AbstractText input && !input.isMultiline()) return 0;
         Style style = element.getRawComputedStyle();
+        if (!Size.isNaturalMeasurementContext()
+                && ("absolute".equals(style.position) || "fixed".equals(style.position))) {
+            Size used = element.getRenderer().size.get();
+            if (used != null) {
+                Box usedBox = Box.of(element);
+                return Math.max(0, used.width() - usedBox.getBorderHorizontal() - usedBox.getPaddingHorizontal()
+                        - Math.abs(text.textIndent));
+            }
+        }
         CssLength widthLength = style.widthLength();
         Double explicitWidth = widthLength.numberValue();
         if (explicitWidth == null && Size.isNaturalMeasurementContext()
@@ -1479,8 +1549,10 @@ public class Text {
         }
         Box box = Box.of(element);
         double resolved;
+        Double assignedWidth = io.github.kltyton.kltytonui.layout.Layout.assignedTextContentWidth(element);
+        if (assignedWidth != null) return Math.max(0, assignedWidth - Math.abs(text.textIndent));
         Double naturalContentWidth = Size.getNaturalContentWidthConstraint(element);
-        Size assignedGridSize = Size.isNaturalMeasurementContext() ? null : Grid.resolveAssignedSize(element);
+        Size assignedGridSize = Size.isNaturalMeasurementContext() ? null : io.github.kltyton.kltytonui.layout.Layout.resolveAssignedSize(element);
         if (assignedGridSize != null) {
             resolved = assignedGridSize.width() - box.getBorderHorizontal() - box.getPaddingHorizontal();
         } else if (naturalContentWidth != null) {

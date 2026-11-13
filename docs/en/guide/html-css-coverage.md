@@ -10,28 +10,28 @@ Three support tiers:
 | 🟡 | Partial support: parses and behaves, but with clear gaps versus the spec |
 | ❌ | Unsupported: ignored when set (CSS properties warn once) |
 
-Overall profile: the selector layer is the most complete; layout is a "common subset + key omissions" (no float, no table layout, no sticky); the painting layer covers a lot (shadows, filters, clip-path, transforms, animations all work); the HTML layer targets UI rather than documents — **there is no UA default styling**, so `h1` and `div` are visually indistinguishable.
+Overall profile: the selector layer is the most complete; layout is a "common subset + key omissions" (no float, no sticky); the painting layer covers a lot (shadows, filters, clip-path, transforms, animations all work); the HTML layer targets UI rather than documents — basic defaults cover controls and table roles, while CSS defines page typography and spacing.
 
 ## Migration Cheat Sheet
 
 If you're short on time, read only this section. Before moving a browser page into KUI, check in priority order:
 
-1. **UA styles are zero**: write all styles for h1-h6, p, ul/li yourself; don't use br/hr to express layout;
-2. **Layout to avoid**: float, sticky, grid's areas/auto-flow/named lines, negative margins, table layout;
-3. **Value parsing to avoid**: calc multiplication/division, border styles like dashed (solid only), currentColor, named colors beyond the 26, radial/conic gradients, skew/matrix transforms;
+1. **CSS defines page presentation**: style headings, paragraphs and lists explicitly; table tags retain their layout roles;
+2. **Layout boundaries**: float, sticky and negative margins remain limited; Grid supports areas, auto-flow, named lines and implicit tracks, and tables use automatic column sizing;
+3. **Value parsing to avoid**: calc multiplication/division, the supported border styles, named colors beyond the 26, radial/conic gradients, skew/matrix transforms;
 4. **Cascade caveat**: the cascade follows browser ordering — normal inline > normal stylesheet, stylesheet `!important` > normal inline, inline `!important` wins over everything;
 5. **Text caveats**: italic has no effect (use oblique), justify has no effect, vertical-align only works with baseline, text-decoration only has underline/line-through;
 6. **Form caveats**: types like date/email/url degrade to plain text boxes; form submission only fires an event, no request;
-7. **transition whitelist**: properties outside the list (gap, grid-template, font-size, etc.) jump instantly.
+7. **transition whitelist**: gap and structurally compatible Grid tracks interpolate; properties outside the list change discretely.
 
 ## HTML Parser
 
-A regex-based tokenizer, not a standard tree builder.
+The tokenizer recognizes quoted attribute boundaries and preserves quoted `>` characters and literal `<` text. Tree construction uses the framework's own implementation.
 
 - ✅ All attribute syntaxes, comments, doctype stripping, self-closing and void tags, script/style raw text, always synthesizing html/head/body;
 - 🟡 Only six named entities — `amp apos gt lt nbsp quot` — plus numeric entities; there is pop-stack error recovery, but **no browser-style implicit tag generation** — `<p>` is not auto-closed, `<tbody>` is not inserted;
 - 🟡 A `<script>` with both src and inline content executes **both** (non-standard); no defer/async/module;
-- `<head>` children (title, etc.) don't enter the DOM; there is no `document.title`; `<meta>` only reads the two kui-* specific configs kui-viewport and kui-mouse-events (see the [meta section](kltytonui-screen#page-meta-configuration)); charset is fixed to UTF-8.
+- Stylesheet links in `<head>` remain in the DOM and unload their sheets when removed. Runtime link/style elements survive a style refresh. `<meta>` supports kui-viewport, kui-mouse-events, kui-preload, and kui-hyphen-break (see the [meta section](kltytonui-screen#page-meta-configuration)); charset is fixed to UTF-8.
 
 ## HTML Elements
 
@@ -75,7 +75,7 @@ For extension tags such as texture, sprite, and translation, see the [Extension 
 
 ## Layout
 
-**display**: block/inline/inline-block/flex/inline-flex/grid/inline-grid/none ✅; table/list-item/flow-root degrade to block; contents and other unknown values are all block.
+**display**: supports block, inline, inline-block, flex, inline-flex, grid, inline-grid, none, table, table-row-group, table-header-group, table-footer-group, table-row and table-cell. list-item, flow-root and unknown values use block layout.
 
 **Box model**:
 
@@ -89,7 +89,9 @@ For extension tags such as texture, sprite, and translation, see the [Extension 
 
 **Flexbox**: row/column, row-reverse/column-reverse, wrap/wrap-reverse (**including column-direction wrapping**: a definite-height container breaks into columns when the accumulated height overflows; justify-content within a column, align-content between columns, and align-items inside each column all apply; an auto-height container stays a single column per spec), the six justify-content values plus the `start`/`end`/`left`/`right`/`normal` aliases (`left`/`right` fall back to flex-start in column direction per spec), grow/shrink/basis (**`flex-basis: content` uses the natural size instead of collapsing**; an omitted basis in the `flex` shorthand is `0%` per spec), **min/max respected during distribution** (the flex base size is first clamped to the hypothetical main size, min winning conflicts; a grow item that hits its max freezes and redistributes the remainder to siblings, and once everything is frozen the leftover goes to justify-content), gap, auto margins, anonymous items, order, align-content (including `end`/`normal`, the latter behaving as stretch per spec) all ✅; anonymous text items (direct text) **soft-wrap** at the row container's content width ✅ (known MVP deviation: in mixed layouts text wraps at the full container width rather than its shrunken share, and multiple anonymous items each wrap at the full width independently); align-items/align-self **baseline ✅**: row direction aligns within the baseline-sharing group (with mixed align-self, only items whose computed value is baseline join the group — the rest keep their own alignment), wrap containers align per line, and column direction equals flex-start per spec; the `first baseline`/`last baseline` aliases equal `baseline` per spec.
 
-**Grid** (MVP): template-columns/rows (px/auto/fr/minmax/repeat including auto-fill/fit), gap, items/self alignment, `grid-row/column`'s `N`, `span N`, `N / M`, auto placement ✅; ❌ named lines, template-areas, auto-flow, implicit tracks, place-* shorthands, subgrid.
+**Grid**: explicit and implicit tracks, px/auto/fr/minmax/repeat/fit-content, min/max-content, gap, items/self alignment, named lines, template-areas, auto-flow/dense, place-* shorthands and subgrid. Direct text participates in layout and selection; absolutely positioned children can use their assigned grid area as a containing block.
+
+**Tables**: automatic layout shares column widths and row heights, with row groups, colspan/rowspan, cell size constraints and separate borders.
 
 **Inline**: inline/inline-block line breaking, baseline alignment ✅; **vertical-align only has a real effect with baseline** — all other keywords are silently inert.
 
@@ -127,21 +129,21 @@ For extension tags such as texture, sprite, and translation, see the [Extension 
 
 ## Color, Interaction, Animation
 
-**Color**: the whole hex family, rgb/rgba old and new syntaxes, hsl/hsla, transparent ✅; `color(srgb-linear r g b / a)` is parsed into a linear-light working color (components are retained through the renderer's 16x SDR bound); `dynamic-range-limit` accepts `standard`, `constrained`, `no-limit`, numbers, and percentages and maps the working range in the filter shader. Ordinary 8-bit framebuffers still clamp presentation above SDR white. Only 26 named colors (CSS has 148); **currentColor resolves to black** (except inside SVG); hwb/lab/lch/oklch ❌.
+**Color**: the whole hex family, rgb/rgba old and new syntaxes, hsl/hsla, transparent ✅; `color(srgb-linear r g b / a)` is parsed into a linear-light working color (components are retained through the renderer's 16x SDR bound); `dynamic-range-limit` accepts `standard`, `constrained`, `no-limit`, numbers, and percentages and maps the working range in the filter shader. Ordinary 8-bit framebuffers still clamp presentation above SDR white. Only 26 named colors (CSS has 148); **currentColor uses the element's computed text color** in backgrounds, borders, linear gradients, masks and SVG paint; without a style context it uses the default text color; hwb/lab/lch/oklch ❌.
 
 **Interaction**: common cursor values + `url()` custom cursors ✅ (move/wait/grab, etc. fall back to the arrow); user-select, pointer-events, accent-color, appearance, resize (textarea) ✅. The outline shorthand and outline-width/style/color/offset are implemented, with solid and dashed strokes and negative offsets; other visible styles render as solid. Outlines paint after descendants without affecting layout sizes or hit testing.
 
 **Pseudo-element content**: only a single quoted string; attr()/counter()/url()/multi-part concatenation ❌.
 
-**transition**: shorthand, comma lists, all, delays, interruption and reverse redirection ✅; but **animatable properties are a whitelist** — opacity, width/height, transform, filter, color, background-color, the four position edges, margin/padding, border-width, border-radius, box-shadow; anything outside the list jumps instantly.
+**transition**: shorthand, property/duration/delay/timing-function longhands, CSS variables, comma lists, all, delays, interruption and reverse redirection; **animatable properties are a whitelist** — opacity, width/height, transform, filter, color, background-color, the four position edges, margin/padding, border-width, border-radius, box-shadow, gap and structurally compatible Grid tracks; other properties change discretely.
 
 **animation**: the full shorthand family, multiple animations, the four direction/fill-mode values, steps/cubic-bezier ✅; for interpolation, transform/filter/box-shadow have dedicated interpolation, the rest use generic numeric/color interpolation, and discrete properties don't animate.
 
 ## Rendering Layer
 
 - Text: custom fonts raster per-glyph with AWT (1:1 at the glyph's on-screen physical size, tinted at draw time) into a shared atlas; MC fonts use the vanilla pipeline;
-- Images: UV windows, multi-layer tiling, nine-slice, batching;
-- Masking: stencil template masks (including rounded corners), scissor, scroll clipping;
+- Images: UV windows, multi-layer tiling, nine-slice and batching; image-rendering supports auto/smooth/high-quality/crisp-edges/pixelated, with nearest-neighbor enlargement and smooth reduction for pixelated;
+- Masking: rounded corners, clip-path, scissor and scroll clipping; Fabric 26.1/26.2 use color-and-depth clip layers, while backends with hardware stencil APIs use stencil masks;
 - Filters: offscreen FBO, separable blur;
 - Canvas 2D: full path API, gradients/patterns, ImageData, Path2D (all SVG path commands), OffscreenCanvas; no conicGradient, no WebGL;
 - SVG: basic shapes + path (including arcs, evenodd) + fill/stroke family + currentColor, output as a bitmap at 4x supersampling; no g/defs/use/text, gradients, filter, transform attributes, or nested svg.

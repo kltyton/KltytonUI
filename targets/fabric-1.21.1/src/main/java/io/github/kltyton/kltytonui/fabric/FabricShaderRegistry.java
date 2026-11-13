@@ -13,6 +13,7 @@ public final class FabricShaderRegistry {
     private static ShaderInstance filterMaskIntersectShader;
     private static ShaderInstance filterMaskSubtractShader;
     private static ShaderInstance filterMaskExcludeShader;
+    private static ShaderInstance backgroundShader;
     private FabricShaderRegistry() { }
     public static void register() {
         CoreShaderRegistrationCallback.EVENT.register(context -> {
@@ -23,6 +24,7 @@ public final class FabricShaderRegistry {
             context.register(ResourceLocation.fromNamespaceAndPath("kltytonui", "filter_mask_intersect"), DefaultVertexFormat.POSITION_TEX, shader -> filterMaskIntersectShader = shader);
             context.register(ResourceLocation.fromNamespaceAndPath("kltytonui", "filter_mask_subtract"), DefaultVertexFormat.POSITION_TEX, shader -> filterMaskSubtractShader = shader);
             context.register(ResourceLocation.fromNamespaceAndPath("kltytonui", "filter_mask_exclude"), DefaultVertexFormat.POSITION_TEX, shader -> filterMaskExcludeShader = shader);
+            context.register(ResourceLocation.fromNamespaceAndPath("kltytonui", "background"), DefaultVertexFormat.POSITION_TEX, shader -> backgroundShader = shader);
         });
     }
     public static ShaderInstance getFilterShader() { return filterShader; }
@@ -32,4 +34,5 @@ public final class FabricShaderRegistry {
     public static ShaderInstance getFilterMaskIntersectShader() { return filterMaskIntersectShader; }
     public static ShaderInstance getFilterMaskSubtractShader() { return filterMaskSubtractShader; }
     public static ShaderInstance getFilterMaskExcludeShader() { return filterMaskExcludeShader; }
+    public static ShaderInstance getBackgroundShader() { return backgroundShader; }
 }

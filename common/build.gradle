@@ -1,6 +1,6 @@
 // Standalone build for the shared source tree.
 //
-// KUI's common/ contains Minecraft/Forge/KubeJS types, so it cannot be the
+// KUI's common/ contains Minecraft/Forge types, so it cannot be the
 // loader-neutral Java-8 module of the upstream framework. It compiles against
 // the same legacyforge + mod dependency classpath as the Forge target. Targets
 // do NOT include this as a Gradle subproject; they compile common sources via
@@ -45,14 +45,13 @@ repositories {
 }
 
 dependencies {
-    modCompileOnly ("curse.maven:kubejs-238086:5853326")
-    modCompileOnly ("curse.maven:rhino-416294:6186971")
+    implementation 'dev.mooner.neonjs:neonjs-runtime:0.1.4'
     modCompileOnly ("curse.maven:architectury-api-419699:5137938")
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation ("curse.maven:rhino-416294:6186971")
+    testRuntimeOnly 'com.ibm.icu:icu4j:71.1'
 }
 
 configurations {

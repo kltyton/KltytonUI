@@ -1,5 +1,7 @@
 # WPT Layout Comparison
 
+The WPT runner uses the source development environment. Release JARs omit test runners and test pages; `runWptClient` uses the project's development classpath.
+
 `wpt/` treats Web Platform Tests CSS layout pages as the baseline: the same HTML first has element geometry snapshots captured in Chromium, then is parsed and captured by the KUI client, and the two sides compare tag/id and rectangles in DOM order (threshold 0.25 CSS pixels).
 
 **`pass` only means "KUI and the browser's geometry snapshots match"** — it does not mean passing the WPT spec tests. testharness assertions, reftest reference pages, and JS semantics are all out of scope.

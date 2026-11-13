@@ -34,6 +34,10 @@ public final class StyleScope {
         requestRecalc(element, RecalcMode.SUBTREE);
     }
 
+    public void requestInlineRecalc(Element element, boolean hasPreviousStyle) {
+        requestRecalc(element, hasPreviousStyle ? RecalcMode.SELF : RecalcMode.SUBTREE);
+    }
+
     public void requestPseudoRecalc(Element element, String pseudoName) {
         if (element == null || element.document != owner) return;
         switch (getSelectorIndex().pseudoRecalcScope(element, pseudoName)) {
@@ -80,47 +84,64 @@ public final class StyleScope {
             }
         }
 
-        for (Request request : roots) {
-            Element root = request.element;
-            if (request.mode == RecalcMode.SELF) {
-                recomputeSelfAndMaybeDescendants(root);
-            } else {
-                recomputeSubtree(root);
+        io.github.kltyton.kltytonui.layout.LayoutMeasureCache.begin();
+        try {
+            for (Request request : roots) {
+                Element root = request.element;
+                if (isCoveredByAncestor(root, selectedSubtreeRoots)) continue;
+                if (request.mode == RecalcMode.SELF) {
+                    if (recomputeSelfAndMaybeDescendants(root)) selectedSubtreeRoots.add(root);
+                } else {
+                    recomputeSubtree(root);
+                }
             }
+        } finally {
+            io.github.kltyton.kltytonui.layout.LayoutMeasureCache.end();
         }
         return true;
     }
 
     public void recomputeSubtree(Element root) {
+        recomputeSubtree(root, false);
+    }
+
+    private void recomputeSubtree(Element root, boolean ancestorCustomPropertiesChanged) {
         if (root == null || root.document != owner) return;
 
         ArrayDeque<Element> stack = new ArrayDeque<>();
+        ArrayDeque<Boolean> inheritedChanges = new ArrayDeque<>();
         stack.push(root);
+        inheritedChanges.push(ancestorCustomPropertiesChanged);
 
         while (!stack.isEmpty()) {
             Element current = stack.pop();
+            boolean inheritedChange = inheritedChanges.pop();
             if (current == null || current.document != owner) continue;
 
+            if (inheritedChange) current.invalidateInheritedCustomProperties();
             recomputeStyle(current);
+            boolean changedForChildren = inheritedChange || current.customPropertiesChangedOnRecalc();
 
             List<Element> children = current.children;
             for (int i = children.size() - 1; i >= 0; i--) {
                 Element child = children.get(i);
                 if (child == null) continue;
                 stack.push(child);
+                inheritedChanges.push(changedForChildren);
             }
         }
     }
 
-    private void recomputeSelfAndMaybeDescendants(Element element) {
-        if (element == null || element.document != owner) return;
+    private boolean recomputeSelfAndMaybeDescendants(Element element) {
+        if (element == null || element.document != owner) return false;
         boolean descendantsAffected = recomputeStyle(element);
-        if (!descendantsAffected) return;
+        if (!descendantsAffected) return false;
 
         List<Element> children = element.children;
         for (int i = 0; i < children.size(); i++) {
-            recomputeSubtree(children.get(i));
+            recomputeSubtree(children.get(i), element.customPropertiesChangedOnRecalc());
         }
+        return true;
     }
 
     public void invalidateSelectorIndex() {

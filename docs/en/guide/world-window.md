@@ -2,7 +2,6 @@
 
 WorldWindow renders an HTML Document as a flat plane inside the Minecraft world: info signs, machine external screens, entity overhead labels, floating hints. It is neither a Screen nor an Overlay — it has world coordinates, orientation, perspective scaling, and block occlusion, and interaction works via crosshair raycasts. The page itself is still a normal KUI page; DOM, events, and form capabilities all work.
 
-The KubeJS examples in this guide apply to Forge 1.20.1 and NeoForge 1.21.1; the Java API is available on the other targets. See the [overview](overview#loader-and-script-support).
 
 ## Minimal Example
 
@@ -13,7 +12,7 @@ World windows are recommended to use `mode=fixed` with an explicitly declared lo
 <meta name="kui-mouse-events" content="intercept">
 ```
 
-Java creation (KubeJS client scripts use the same API, passing coordinates directly as x, y, z):
+Java creation:
 
 ```java
 WorldWindow window = KltytonUI.createWorldWindow(
@@ -36,7 +35,8 @@ These are client APIs. If the position data lives on the server, sync it to the 
 - A resource reload rebuilds the DOM and reruns scripts, but **preserves the WorldWindow instance** — position, orientation, distance, and other settings are not reset;
 - Old Element references become invalid after a refresh, as usual;
 - Changing spatial properties like position, rotation, or depth does not require rebuilding the Document — just call the setters;
-- Don't call `addWindow` twice on the same instance; it would draw twice and receive events twice.
+- Don't call `addWindow` twice on the same instance; it would draw twice and receive events twice;
+- World windows exist only on the player client. On disconnect or when returning to the title screen, the framework clears all world windows and their Documents, so they never leak across saves.
 
 ## Size: viewport, Auto-Scaling, Manual Scaling
 
@@ -60,7 +60,7 @@ The position is a world coordinate, and the plane is centered on that point:
 window.setPosition(entity.position().add(0, entity.getBbHeight() + 0.25, 0));  // above the entity's head
 ```
 
-For rotation, prefer `setRotation(yaw, pitch, roll)` in degrees. **Pitfall**: the parameter order of `setRotation(Vec3)` is `(pitch, yaw, roll)`, not yaw first — this is for historical compatibility. KubeJS's three-argument overload is already converted for you at the binding layer; pass yaw, pitch, roll normally. For quaternions use `setOrientation(Quaternionf)` (it makes a copy).
+For rotation, prefer `setRotation(yaw, pitch, roll)` in degrees. **Pitfall**: the parameter order of `setRotation(Vec3)` is `(pitch, yaw, roll)`, not yaw first — this is for historical compatibility. For quaternions use `setOrientation(Quaternionf)` (it makes a copy).
 
 `setFacing(true)` faces the camera every frame, suitable for labels; don't enable it for signs with a fixed orientation.
 

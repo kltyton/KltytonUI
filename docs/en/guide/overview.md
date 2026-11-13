@@ -23,20 +23,20 @@ Page behavior is controlled by two metas — logical viewport (`kui-viewport`) a
 
 The repository currently contains these targets. This table reflects the source tree and CI configuration; it does not imply that every target is currently published:
 
-| Target | Minecraft | Page scripts | KubeJS `KltytonUI` bindings | CI JDK |
-| --- | --- | --- | --- | --- |
-| Forge | 1.18.2 | Supported | Not provided | 21 |
-| Forge | 1.19.2 | Supported | Not provided | 21 |
-| Forge | 1.20.1 | Supported | Provided | 21 |
-| Fabric | 1.20.1 | Supported | Not provided | 17 |
-| Fabric | 1.21.1 | Supported | Not provided | 21 |
-| NeoForge | 1.21.1 | Supported | Provided | 21 |
-| Fabric | 26.1 | Supported | Not provided | 25 |
-| Fabric | 26.2 | Supported | Not provided | 25 |
-| NeoForge | 26.1 | Supported | Not provided | 25 |
-| NeoForge | 26.2 | Supported | Not provided | 25 |
+| Target | Minecraft | Page scripts | CI JDK |
+| --- | --- | --- | --- |
+| Forge | 1.18.2 | Supported | 21 |
+| Forge | 1.19.2 | Supported | 21 |
+| Forge | 1.20.1 | Supported | 21 |
+| Fabric | 1.20.1 | Supported | 17 |
+| Fabric | 1.21.1 | Supported | 21 |
+| NeoForge | 1.21.1 | Supported | 21 |
+| Fabric | 26.1 | Supported | 25 |
+| Fabric | 26.2 | Supported | 25 |
+| NeoForge | 26.1 | Supported | 25 |
+| NeoForge | 26.2 | Supported | 25 |
 
-The Java common API, HTML/CSS rendering, and standalone Rhino page runtime are shared across these targets, with target-specific version adapters. Page scripts do not depend on KubeJS; install the corresponding Rhino dependency in the runtime environment. See [Mod-specific API](kltytonui-api) for Java integration.
+The targets share the Java API, HTML/CSS renderer, and embedded NeonJS page runtime. Each document has its own JavaScript realm.
 
 ## What you can use in a page
 
@@ -64,7 +64,6 @@ Pages and resources (CSS, images, fonts, data JSON) are referenced by **logical 
 
 **Java**: the unified entry point is `io.github.kltyton.kltytonui.KltytonUI` — `createDocument`, `new KltytonScreen(path)`, `menu(player, path).bind(...)`, `createWorldWindow(...)`.
 
-**KubeJS**: the global `KltytonUI` client/server bindings are available only on Forge 1.20.1 and NeoForge 1.21.1, with method sets isolated by side (client manages Document/Toast/WorldWindow; server manages containers). Mods can also register their own KJS bindings in supported environments.
 
 Full API tables and thread/null/refresh rules: [Mod-specific API](kltytonui-api).
 
@@ -81,7 +80,6 @@ Full API tables and thread/null/refresh rules: [Mod-specific API](kltytonui-api)
 ## Extension points for mod authors
 
 - Register your own HTML tags: `@ElementRegister` + package scanning — custom-painted or purely semantic elements both work;
-- Register your own KubeJS global objects: `@KJSBindings`;
 - Reuse the built-in Java component library directly: DialogWindow, ContextMenu, ToastManager, Tooltip, ColorPicker, FilePicker: [Built-in UI Library](ui-library).
 
 Thread rules, refresh generations, registration details: [Secondary Development](secondary-development).
@@ -105,12 +103,12 @@ The repository uses a `common + targets` multi-loader structure: `common/` is lo
 | WebView / iframe | [webview.md](webview) |
 | Zoom, selection, clipboard, and other assistive behaviors | [browser-features.md](browser-features) |
 | Resource paths and the Resource Manager | [resource-manager.md](resource-manager) |
-| KJS / Java mod API | [kltytonui-api.md](kltytonui-api) |
+| Java mod API | [kltytonui-api.md](kltytonui-api) |
+| Custom elements and frame scheduling | [secondary-development.md](secondary-development) |
 | Ore theme and visual editor | [ore-theme.md](ore-theme) |
 | McUI theme | [mcui-theme.md](mcui-theme) |
 | Java component library | [ui-library.md](ui-library) |
 | In-game DevTools | [devtools.md](devtools) |
-| Custom elements / KJS bindings / frame timing | [secondary-development.md](secondary-development) |
 | External debug protocol, MCP, screenshot tools | [tools.md](tools) |
 | WPT layout comparison | [wpt.md](wpt) |
 | Maven artifacts, signing, and publishing | [maven-publishing.md](maven-publishing) |

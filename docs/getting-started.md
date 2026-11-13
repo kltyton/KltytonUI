@@ -9,17 +9,17 @@
 - CurseForge: https://www.curseforge.com/minecraft/mc-mods/kltytonui
 - Modrinth: https://github.com/kltyton/KltytonUI
 
-Maven Central 正在准备发布。以下配置需在对应版本公开并确认可解析后使用；当前源码版本见根目录 `gradle.properties`。
+使用 Sighs Maven 仓库，并选择匹配 Loader 和 Minecraft 版本的依赖。
 ```groovy
 repositories {
-    mavenCentral()
+    maven { url = uri("https://maven.sighs.cc/repository/maven-public/") }
 }
 dependencies {
     implementation 'io.github.kltyton.kltytonui:KltytonUI-forge-1.20.1:<已发布版本>'
 }
 ```
 
-此示例对应 Forge 1.20.1。源码还提供 Forge 1.18.2 / 1.19.2、Fabric 1.20.1 / 1.21.1 / 26.1、NeoForge 1.21.1 / 26.1 / 26.2；按 Loader 和 Minecraft 版本选择目标。维护者的附件、签名与上传步骤见 [Maven 发布](guide/maven-publishing)。
+此示例对应 Forge 1.20.1。源码还提供 Forge 1.18.2 / 1.19.2、Fabric 1.20.1 / 1.21.1 / 26.1 / 26.2、NeoForge 1.21.1 / 26.1 / 26.2；按 Loader 和 Minecraft 版本选择目标。维护者的附件、签名与上传步骤见 [Maven 发布](guide/maven-publishing)。
 
 ## 2. 确认它在工作
 
@@ -72,7 +72,7 @@ dependencies {
 
 **没有浏览器默认样式**：`h2`、`p`、`button` 不自带任何外观，字号、颜色、间距全自己写。哪些 CSS 写法能用、哪些会被忽略，见 [HTML/CSS 覆盖面](guide/html-css-coverage)。
 
-**页面脚本使用独立 Rhino 运行时**：九个目标都提供页面脚本支持，运行环境须安装对应的 Rhino 依赖。KubeJS 模组绑定只在 Forge 1.20.1 和 NeoForge 1.21.1 提供。能力清单和 target 差异见 [Web API](guide/web-api) 与 [模组 API](guide/kltytonui-api)。
+KUI 使用内嵌的 NeonJS 0.1.4 执行页面脚本。详见 [Web API](guide/web-api) 和[模组 API](guide/kltytonui-api)。
 
 **路径**：模组按**逻辑路径**找文件，不按磁盘位置。文件在 `<游戏目录>/kltytonui/screens/hello.html`，代码里就写 `screens/hello.html`——不带 `assets/...` 前缀，不写盘符。页面里引 CSS、图片同理。规则见[资源管理](guide/resource-manager)。
 
@@ -87,7 +87,7 @@ dependencies {
 <body class="ore-theme">
 ```
 
-然后套类名：`<button class="button button-primary">`、`<div class="card">`、`<table class="table">`。展示页 `kltytonui/theme/ore/example.html`（在资源管理器里双击打开）把全部组件演示了一遍，照着抄就行。
+然后套类名：`<button class="button button-primary">`、`<div class="card">`、`<table class="table">`。源码仓库的 `theme/ore/example.html` 展示了组件写法，发行 JAR 不包含该示例。
 
 想改配色和间距，直接改 `--ore-*` 变量（见第 9 节的覆写方式）。组件清单：[ore-theme.md](guide/ore-theme)。
 
@@ -108,17 +108,7 @@ HTML 写法四种宿主通用，差别只在页面出现在哪、数据谁来给
 
 ## 6. 从外面操作页面
 
-页面内部的 `<script>` 操作 DOM 上面已经写过了。外部代码先拿到页面，再用同一套 Java API；KubeJS 示例只适用于 Forge 1.20.1 与 NeoForge 1.21.1：
-
-```javascript
-// KubeJS 客户端脚本
-var docs = KltytonUI.getDocument("screens/hello.html");   // 注意：返回列表
-if (docs.length > 0) {
-    var status = docs[0].getElementById("status");
-    status.textContent = "HP: 20";
-    status.setAttribute("class", "warning");
-}
-```
+在客户端线程通过 Java API 查找并更新页面。
 
 ```java
 // Java
@@ -182,10 +172,10 @@ Ore 主题有两个文件对 AI 特别重要，给它这两个，它就能写出
 - **`ore.css`**：全部类名和 `--ore-*` 变量的权威定义；
 - **`example.html`**：每个组件的写法示例。
 
-两个文件的逻辑路径分别是 `/kltytonui/theme/ore/ore.css` 和 `kltytonui/theme/ore/example.html`（在资源管理器里双击 example 能直接看到全部组件效果）。文件内容来源三选一：
+样式表的逻辑路径为 `/kltytonui/theme/ore/ore.css`。示例保留在源码仓库，需要在游戏内预览时可复制到自己的资源目录。文件内容来源：
 
 - GitHub raw：`https://raw.githubusercontent.com/kltyton/KltytonUI/main/common/src/main/resources/assets/kltytonui/kltytonui/kltytonui/theme/ore/ore.css`（example.html 换同目录下的文件名即可）；
-- 模组 jar：jar 本质是 zip，解开后在 `assets/kltytonui/kltytonui/kltytonui/theme/ore/`；
+- 模组 jar：可在 `assets/kltytonui/kltytonui/kltytonui/theme/ore/` 获取样式表；
 - 本地有仓库克隆：`common/src/main/resources/assets/kltytonui/kltytonui/kltytonui/theme/ore/`。
 
 给 AI 的说法大概是：

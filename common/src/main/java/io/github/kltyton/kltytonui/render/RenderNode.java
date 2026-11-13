@@ -2,8 +2,11 @@ package io.github.kltyton.kltytonui.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.kltyton.kltytonui.KltytonUI;
+import io.github.kltyton.kltytonui.element.Model;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.spi.KuiItemRenderRequest;
+import io.github.kltyton.kltytonui.spi.KuiModelRenderRequest;
+import io.github.kltyton.kltytonui.spi.KuiModelRenderService;
 import io.github.kltyton.kltytonui.spi.KuiServices;
 import io.github.kltyton.kltytonui.style.Style;
 import io.github.kltyton.kltytonui.style.Filter;
@@ -150,6 +153,7 @@ public interface RenderNode {
         if (node instanceof RenderNode.ElementContentNode n) return n.target();
         if (node instanceof RenderNode.ElementForegroundNode n) return n.target();
         if (node instanceof RenderNode.ItemNode n) return n.target();
+        if (node instanceof RenderNode.ModelNode n) return n.target();
         if (node instanceof RenderNode.MaskPushNode n) return n.target();
         if (node instanceof RenderNode.MaskPopNode n) return n.target();
         if (node instanceof RenderNode.ScrollbarNode n) return n.target();
@@ -334,6 +338,31 @@ public interface RenderNode {
             KuiServices.render().enableBlend();
             KuiServices.render().setBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
             painter.accept(poseStack);
+        }
+    }
+
+    /** Paints the model resolved by a model element into its content box. */
+    record ModelNode(Model target) implements RenderNode {
+        @Override
+        public void render(PoseStack poseStack) {
+            if (!WorldWindowRenderContext.shouldRenderContent() || shouldSkip(target)) return;
+            ensureRendererLoaded(target);
+            Rect rect = Rect.of(target);
+            if (isFullyCulled(rect, Mask.getCurrentClip())) return;
+            Size size = rect.box.innerSize();
+            if (size.width() <= 0 || size.height() <= 0) return;
+            KuiModelRenderService.Preview preview = target.getPreview();
+            if (preview == null) return;
+            Position position = rect.getContentPosition();
+            Base.commitLocalDraws();
+            poseStack.pushPose();
+            try {
+                Base.applyTransform(poseStack, target);
+                preview.render(new KuiModelRenderRequest(poseStack, target.getModelSpec(),
+                        (float) position.x, (float) position.y, (float) size.width(), (float) size.height()));
+            } finally {
+                poseStack.popPose();
+            }
         }
     }
 

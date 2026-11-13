@@ -17,6 +17,9 @@ public class Loader {
     // mode must also recognize <repo>/common/src/main/resources when walking up
     // from the game directory.
     private static final String COMMON_DEV_ASSET_ROOT = "common/" + DEV_ASSET_ROOT;
+    private static final Object GLOBAL_SCRIPT_CACHE_LOCK = new Object();
+    private static long globalScriptGeneration;
+    private static GlobalScriptSnapshot globalScriptSnapshot;
 
     public enum ResourceLayer {
         RESOURCE_PACK,
@@ -183,20 +186,51 @@ public class Loader {
     }
 
     public static String readGlobalJS() {
-        String ecmascript = readScriptResource("ecmascript.js");
-        String global = readScriptResource("global.js");
-        if (ecmascript == null || ecmascript.isBlank()) return global;
-        if (global == null || global.isBlank()) return ecmascript;
-        return global + "\n" + ecmascript;
+        synchronized (GLOBAL_SCRIPT_CACHE_LOCK) {
+            GlobalScriptSnapshot cached = globalScriptSnapshot;
+            if (cached != null && cached.generation == globalScriptGeneration) {
+                return cached.source;
+            }
+
+            ScriptResourceResult ecmascriptResult = readScriptResource("ecmascript.js");
+            ScriptResourceResult globalResult = readScriptResource("global.js");
+            String ecmascript = ecmascriptResult.source;
+            String global = globalResult.source;
+            String source;
+            if (ecmascript == null || ecmascript.isBlank()) source = global;
+            else if (global == null || global.isBlank()) source = ecmascript;
+            else source = global + "\n" + ecmascript;
+
+            if (ecmascriptResult.success && globalResult.success) {
+                globalScriptSnapshot = new GlobalScriptSnapshot(globalScriptGeneration, source);
+            }
+            return source;
+        }
     }
 
-    private static String readScriptResource(String path) {
+    static void invalidateGlobalJSSourceCache() {
+        synchronized (GLOBAL_SCRIPT_CACHE_LOCK) {
+            globalScriptGeneration++;
+            globalScriptSnapshot = null;
+        }
+    }
+
+    private static ScriptResourceResult readScriptResource(String path) {
         try (InputStream stream = getResourceStream(path)) {
-            if (stream != null) return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            if (stream != null) {
+                return new ScriptResourceResult(new String(stream.readAllBytes(), StandardCharsets.UTF_8), true);
+            }
+            return new ScriptResourceResult(null, true);
         } catch (IOException exception) {
             KltytonUI.LOGGER.warn("[KUI Resource] failed to read {}", path, exception);
+            return new ScriptResourceResult(null, false);
         }
-        return null;
+    }
+
+    private record ScriptResourceResult(String source, boolean success) {
+    }
+
+    private record GlobalScriptSnapshot(long generation, String source) {
     }
 
     private static boolean isProjectRoot(Path path) {

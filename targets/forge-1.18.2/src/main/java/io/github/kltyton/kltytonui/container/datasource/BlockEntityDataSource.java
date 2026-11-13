@@ -95,9 +95,6 @@ public final class BlockEntityDataSource implements ContainerDataSource {
             return new BlockEntityDataSource(blockEntity, handler, resolvedCapacity);
         }
 
-        // 这里没有 1.20.1/1.19.2 那条 KubeJS 兜底分支：KubeJS 1.18.2 还没有
-        // BlockEntityJS / InventoryKJS（1.19 才引入脚本方块实体与它的库存抽象），
-        // 脚本方块在 1.18.2 也无法持有库存，所以通用 IItemHandler capability 就是全部来源。
         return null;
     }
 }

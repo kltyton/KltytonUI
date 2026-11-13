@@ -92,6 +92,17 @@ public class Font {
         }
     }
 
+    public static java.awt.Font decodeBaseFont(byte[] bytes) throws FontFormatException, IOException {
+        try (InputStream stream = new java.io.ByteArrayInputStream(bytes)) {
+            return java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, stream)
+                    .deriveFont(java.awt.Font.PLAIN, BASE_FONT_SIZE);
+        }
+    }
+
+    public static void registerDecodedFont(String key, java.awt.Font font) {
+        registerResolvedFont(key, font);
+    }
+
     public static boolean registerFont(String key, File fontFile) {
         if (key == null || key.isBlank() || fontFile == null || !fontFile.exists()) {
             KltytonUI.LOGGER.warn("[KUI Font] font file is missing family={} file={}", key, fontFile);
@@ -565,12 +576,7 @@ public class Font {
 
     private static java.awt.Font deriveCachedFont(java.awt.Font font, int fontStyle, float size) {
         if (font == null) return null;
-        DerivedFontKey key = new DerivedFontKey(
-                font.getFontName(Locale.ROOT),
-                font.getFamily(Locale.ROOT),
-                fontStyle,
-                Float.floatToIntBits(size)
-        );
+        DerivedFontKey key = new DerivedFontKey(font, fontStyle, Float.floatToIntBits(size));
         return DERIVED_FONT_CACHE.computeIfAbsent(key, unused -> font.deriveFont(fontStyle, size));
     }
 
@@ -608,7 +614,17 @@ public class Font {
     public record FontRun(java.awt.Font font, String text) {
     }
 
-    private record DerivedFontKey(String fontName, String family, int style, int sizeBits) {
+    private record DerivedFontKey(java.awt.Font base, int style, int sizeBits) {
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof DerivedFontKey key && base == key.base
+                    && style == key.style && sizeBits == key.sizeBits;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * (31 * System.identityHashCode(base) + style) + sizeBits;
+        }
     }
 
     private record RunPlanKey(String familyChain, int style, int sizeBits, String content) {

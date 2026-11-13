@@ -35,7 +35,7 @@ public final class SelectionUnits {
     public static boolean isAtomicObject(Element element) {
         if (element == null) return false;
         boolean supportedTag = switch (element.tagName) {
-            case "IMG", "HR", "SVG", "CANVAS", "TEXTURE", "SPRITE" -> true;
+            case "IMG", "HR", "SVG", "CANVAS", "TEXTURE", "SPRITE", "MODEL" -> true;
             default -> false;
         };
         if (!supportedTag) return false;
@@ -124,6 +124,7 @@ public final class SelectionUnits {
     /** 扁平化文本的实际计算（绕过文档缓存），供缓存 miss 时调用。 */
     public static String computeFlattenedSelectableText(Element element) {
         if (element == null || element instanceof AbstractText) return "";
+        if ("MODEL".equals(element.tagName)) return "";
         String display = element.getComputedStyle().display;
         if (Layout.isFlexDisplay(display) || Layout.isGridDisplay(display)) {
             StringBuilder flexText = new StringBuilder();
@@ -241,9 +242,8 @@ public final class SelectionUnits {
         if (element == null || element instanceof AbstractText) return false;
         if (element.getRenderChildNodes().isEmpty()) return false;
         String display = element.getComputedStyle().display;
-        if (Layout.isGridDisplay(display)) return false;
-        if (Layout.isFlexDisplay(display)) {
-            return !Flex.computeDirectTextLayouts(element).isEmpty();
+        if (Layout.isFlexDisplay(display) || Layout.isGridDisplay(display)) {
+            return !Layout.computeDirectTextLayouts(element).isEmpty();
         }
         if (element.getRenderChildren().isEmpty()) {
             for (Node child : element.getRenderChildNodes()) {
@@ -436,6 +436,7 @@ public final class SelectionUnits {
      *                     false = 连子单元的文本一起收（flex/grid 的 innerText 回退语义）
      */
     private static void flattenRaw(Element unit, Element current, StringBuilder raw, boolean skipSubUnits) {
+        if ("MODEL".equals(current.tagName)) return;
         boolean contributed = false;
         // 索引循环：选区文本扁平化逐帧递归走整棵子树，for-each 迭代器分配
         // JFR 归因约 10MB。

@@ -206,8 +206,7 @@ public final class ClientService implements KuiClientService {
 
     @Override
     public boolean isProduction() {
-        // FMLLoader.isProduction() became an instance method in NeoForge 26.1; keep it simple.
-        return false;
+        return FMLEnvironment.isProduction();
     }
 
     @Override

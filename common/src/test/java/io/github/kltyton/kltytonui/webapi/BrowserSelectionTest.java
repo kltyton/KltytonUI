@@ -218,35 +218,25 @@ class BrowserSelectionTest {
     }
 
     // ------------------------------------------------------------------
-    // dataset:DOMStringMap 的 Map 语义(Rhino 对 Java Map 支持任意键读写,
-    // 浏览器写法的 el.dataset.x = v 才不抛 "no public instance field named x")
+    // dataset:DOMStringMap 的任意键读写与属性同步。
     // ------------------------------------------------------------------
 
     @Test
-    void datasetArbitraryKeyAssignmentThroughRhino() throws Exception {
-        Document document = document();
-        Element el = document.createElement("div");
-        Element.DOMStringMap dataset = el.getDataset();
-
-        dev.latvian.mods.rhino.Context cx = RhinoTestSupport.enterContext();
-        try {
-            dev.latvian.mods.rhino.Scriptable scope = cx.initStandardObjects();
-            RhinoTestSupport.put(cx, scope, "ds", RhinoTestSupport.wrap(cx, scope, dataset));
-            Object result = cx.evaluateString(scope,
-                    "ds.block = 5;"
-                            + "ds['x.y'] = 'v';"
-                            + "ds.action = 'mark';"
-                            + "var out = ds.block + '|' + ds.get('block') + '|' + ds['x.y'] + '|' + ds.action;"
-                            + "out;",
-                    "dataset", 1, null);
-            assertEquals("5|5|v|mark", result);
-            // Java 侧同步到 data-* 属性
+    void datasetArbitraryKeyAssignmentThroughNeon() {
+        TestDocumentFactory.withNeonDocument(document -> {
+            Element el = document.createElement("div");
+            el.setAttribute("id", "dataset-probe");
+            document.body.appendChild(el);
+            io.github.kltyton.kltytonui.script.neon.NeonPageRuntime.eval(
+                    "var ds = document.querySelector('#dataset-probe').dataset;"
+                            + "ds.block = 5; ds['x.y'] = 'v'; ds.action = 'mark';"
+                            + "document.body.setAttribute('data-result', ds.block + '|' + ds.get('block') + '|' + ds['x.y'] + '|' + ds.action);",
+                    null, "dataset");
+            assertEquals("5|5|v|mark", document.body.getAttribute("data-result"));
             assertEquals("5", el.getAttribute("data-block"));
             assertEquals("mark", el.getAttribute("data-action"));
             assertEquals("v", el.getAttribute("data-x.y"));
-        } finally {
-            // fork 无 Context.exit()
-        }
+        });
     }
     // ------------------------------------------------------------------
     // readSelection 等价:anchorOffset 修复后 o = 点击处(不是块末尾)

@@ -1,22 +1,43 @@
 package io.github.kltyton.kltytonui.dom;
 
 import java.util.ArrayDeque;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.RandomAccess;
+import java.util.UUID;
 import io.github.kltyton.kltytonui.render.Drawer;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.spi.KuiServices;
 import io.github.kltyton.kltytonui.parser.Selector;
+import io.github.kltyton.kltytonui.script.neon.NeonPageRuntime;
 import io.github.kltyton.kltytonui.style.Style;
 
 public final class ElementTree {
     private final Document owner;
     private final ArrayList<Node> nodes = new ArrayList<>();
-    private final ArrayList<Element> elements = new ArrayList<>();
+    private final TrackedElementList elements = new TrackedElementList();
     private final HashMap<String, Element> idMap = new HashMap<>();
+    private final IdentityHashMap<Element, Boolean> registeredElements = new IdentityHashMap<>();
+    private boolean elementIndexValid = true;
+
+    private void rebuildElementIndex() {
+        registeredElements.clear();
+        for (Element element : elements) if (element != null) registeredElements.put(element, Boolean.TRUE);
+        elementIndexValid = true;
+    }
+
+    private int findLastElementIndex(UUID uuid) {
+        for (int i = elements.size() - 1; i >= 0; i--) {
+            Element element = elements.get(i);
+            if (element != null && uuid.equals(element.uuid)) return i;
+        }
+        return -1;
+    }
 
     public ElementTree(Document owner) {
         this.owner = owner;
@@ -31,16 +52,21 @@ public final class ElementTree {
     }
 
     public void clear() {
+        if (!nodes.isEmpty()) NeonPageRuntime.treeChanged(nodes.get(0));
         nodes.clear();
-        elements.clear();
+        elements.clearInternally();
         idMap.clear();
+        registeredElements.clear();
+        elementIndexValid = true;
     }
 
     public void rebuildFromRoot(Element root) {
-        nodes.clear();
-        elements.clear();
-        idMap.clear();
-        if (root == null) return;
+        Node oldRoot = nodes.isEmpty() ? null : nodes.get(0);
+        clear();
+        if (root == null) {
+            if (oldRoot != null) NeonPageRuntime.treeChanged(oldRoot);
+            return;
+        }
 
         root.parentNode = null;
         root.parentElement = null;
@@ -73,16 +99,26 @@ public final class ElementTree {
                 stack.push(child);
             }
         }
+        rebuildElementIndex();
+        if (oldRoot != null && oldRoot != root) NeonPageRuntime.treeChanged(oldRoot);
+        if (root != null) NeonPageRuntime.treeChanged(root);
     }
 
     public void updateElement(Element element) {
-        int index = -1;
-        for (Element e : elements) {
-            if (e.uuid.equals(element.uuid)) index = elements.indexOf(e);
-        }
-        if (index == -1) return;
-        elements.set(index, element);
+        if (element == null || element.uuid == null) return;
+        int index = findLastElementIndex(element.uuid);
+        if (index >= 0) elements.set(index, element);
     }
+
+    public void updateInitializedElement(Element origin, Element replacement) {
+        if (origin == null || replacement == null) return;
+        ensureElementIndex();
+        if (!registeredElements.containsKey(origin)) return;
+        int index = elements.lastIndexOfIdentity(origin);
+        if (index >= 0) elements.replaceInternally(index, replacement);
+    }
+
+    private void ensureElementIndex() { if (!elementIndexValid) rebuildElementIndex(); }
 
     public void createRelation(Node child, Node parent, boolean head) {
         if (child == null || parent == null) return;
@@ -118,7 +154,12 @@ public final class ElementTree {
 
     public void removeNode(Node node) {
         if (node == null) return;
-        detachSubtree(node);
+        detachSubtree(node, true);
+    }
+
+    public void removeNode(Node node, boolean notifyTreeChange) {
+        if (node == null) return;
+        detachSubtree(node, notifyTreeChange);
     }
 
     public void clearChildren(Node parent) {
@@ -142,10 +183,11 @@ public final class ElementTree {
             if (child instanceof Element element) {
                 element.parentElement = null;
             }
+            NeonPageRuntime.treeChanged(child);
         }
 
         nodes.removeAll(removedNodes);
-        elements.removeAll(removedElements);
+        elements.removeAllInternally(removedElements);
         for (Element element : removedElements) {
             element.onDisconnectedFromDocument();
             if (element.id != null && !element.id.isBlank()) {
@@ -153,11 +195,13 @@ public final class ElementTree {
             }
             element.getRenderer().route.clear();
         }
+        // 离树后通知一次：运行时样式表元素（link/style）在这里卸载
+        owner.onElementsDetached(removedElements);
         clearRemovedFocusState(removedElements);
 
         if (parent instanceof Element parentElement) {
             clearTextCaches(parentElement);
-            clearLayoutChain(parentElement);
+            parentElement.getRenderer().invalidateLayoutAncestors();
             owner.markDirty(parentElement, Drawer.RELAYOUT | Drawer.REORDER);
         }
         KuiServices.expander().restoreRequiredContent(owner, parent);
@@ -184,6 +228,7 @@ public final class ElementTree {
     private void moveSubtree(Node child, Node parent, int childIndex) {
         if (child == parent || child.contains(parent)) return;
 
+        Document previousOwner = child.document;
         Node oldParent = child.parentNode;
         int oldIndex = oldParent == null ? -1 : oldParent.childNodes.indexOf(child);
         ElementTree sourceTree = oldParent != null && oldParent.document != null
@@ -197,7 +242,7 @@ public final class ElementTree {
         if (owner != null) owner.bumpSelectionCache();
         KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
         if (oldParent != null || child.isConnected() || sourceTree != this) {
-            sourceTree.detachSubtree(child);
+            sourceTree.detachSubtree(child, false);
             // Detaching required Slot/Ingredient content may restore a placeholder.
             KuiServices.expander().validateRuntimeInsertion(owner, parent, child);
         }
@@ -218,8 +263,11 @@ public final class ElementTree {
 
         int insertIndex = safeIndex == 0 ? nodes.indexOf(parent) + 1 : findSubtreeEndExclusive(parent.childNodes.get(safeIndex - 1));
         List<Node> subtreeNodes = flattenSubtree(child);
+        List<Element> subtreeElements = flattenElements(subtreeNodes);
         nodes.addAll(insertIndex, subtreeNodes);
-        elements.addAll(resolveInsertIndexForElements(insertIndex), flattenElements(subtreeNodes));
+        elements.addAllInternally(resolveInsertIndexForElements(insertIndex), subtreeElements);
+        // 整棵子树都挂好了再通知一次：运行时样式表元素（link/style）从这里开始加载
+        owner.onElementsAttached(subtreeElements);
 
         boolean geometryNeutral = isGeometryNeutralChange(child, parent, textSourceBefore);
         if (child instanceof Element childElement) {
@@ -229,12 +277,15 @@ public final class ElementTree {
         if (parent instanceof Element parentElement) {
             markParentTopologyChanged(parentElement, child, geometryNeutral);
         }
+        notifyTreeChanged(child, previousOwner);
         owner.queueMutation(Document.MutationRecord.childList(parent, List.of(child), List.of(), previousSibling, nextSibling));
     }
 
     private Node moveFragmentChildren(DocumentFragment fragment, Node parent, int childIndex) {
         ArrayList<Node> roots = new ArrayList<>(fragment.childNodes);
         if (roots.isEmpty()) return null;
+        ArrayList<Document> previousOwners = new ArrayList<>(roots.size());
+        for (Node child : roots) previousOwners.add(child.document);
         // 片段挂载改变单元的渲染子节点集合，选择缓存随之失效
         if (owner != null) owner.bumpSelectionCache();
         for (Node child : roots) {
@@ -252,7 +303,8 @@ public final class ElementTree {
 
         ArrayList<Node> insertedNodes = new ArrayList<>();
         ArrayList<Element> insertedElements = new ArrayList<>();
-        for (Node child : roots) {
+        for (int i = 0; i < roots.size(); i++) {
+            Node child = roots.get(i);
             updateSubtree(child, parent, parent.depth + 1, owner);
             if (child instanceof Element childElement) {
                 childElement.syncDomStateAfterAttach();
@@ -267,19 +319,29 @@ public final class ElementTree {
 
         int insertIndex = safeIndex == 0 ? nodes.indexOf(parent) + 1 : findSubtreeEndExclusive(parent.childNodes.get(safeIndex - 1));
         nodes.addAll(insertIndex, insertedNodes);
-        elements.addAll(resolveInsertIndexForElements(insertIndex), insertedElements);
+        elements.addAllInternally(resolveInsertIndexForElements(insertIndex), insertedElements);
+        // 整批片段都挂好了再通知一次：运行时样式表元素（link/style）从这里开始加载
+        owner.onElementsAttached(insertedElements);
 
         if (parent instanceof Element parentElement) {
             clearTextCaches(parentElement);
-            clearLayoutChain(parentElement);
+            parentElement.getRenderer().invalidateLayoutAncestors();
             owner.markDirty(parentElement, Drawer.RELAYOUT | Drawer.REORDER);
         }
         KuiServices.expander().normalizeRuntimeChildren(owner, parent);
+        for (int i = 0; i < roots.size(); i++) {
+            notifyTreeChanged(roots.get(i), previousOwners.get(i));
+        }
         owner.queueMutation(Document.MutationRecord.childList(parent, roots, List.of(), previousSibling, nextSibling));
         return roots.get(roots.size() - 1);
     }
 
-    private void detachSubtree(Node node) {
+    private static void notifyTreeChanged(Node node, Document previousOwner) {
+        if (previousOwner == node.document) NeonPageRuntime.treeChanged(node);
+        else NeonPageRuntime.treeChanged(node, previousOwner);
+    }
+
+    private void detachSubtree(Node node, boolean notifyTreeChange) {
         if (owner != null) owner.bumpSelectionCache();
         Node oldParent = node.parentNode;
         if (oldParent != null) {
@@ -301,7 +363,7 @@ public final class ElementTree {
         List<Node> subtree = flattenSubtree(node);
         nodes.removeAll(subtree);
         List<Element> subtreeElements = flattenElements(subtree);
-        elements.removeAll(subtreeElements);
+        elements.removeAllInternally(subtreeElements);
         for (Element element : subtreeElements) {
             element.onDisconnectedFromDocument();
             if (element.id != null && !element.id.isBlank()) {
@@ -309,6 +371,10 @@ public final class ElementTree {
             }
             element.getRenderer().route.clear();
         }
+        // 离树后通知一次：运行时样式表元素（link/style）在这里卸载。
+        // 注意 moveSubtree 也会先走 detachSubtree（移动＝先摘再挂），所以这里对「刚创建、
+        // 还没登记过的元素」会空跑一次——Document 只认登记过的元素，空跑无副作用。
+        owner.onElementsDetached(subtreeElements);
         clearRemovedFocusState(subtreeElements);
         node.parentNode = null;
         if (node instanceof Element element) {
@@ -317,6 +383,7 @@ public final class ElementTree {
         if (oldParent != null) {
             KuiServices.expander().restoreRequiredContent(owner, oldParent);
         }
+        if (notifyTreeChange) NeonPageRuntime.treeChanged(node);
     }
 
     private static void clearTextCaches(Element element) {
@@ -463,5 +530,69 @@ public final class ElementTree {
             if (nodes.get(i) instanceof Element) elementIndex++;
         }
         return elementIndex;
+    }
+
+    private final class TrackedElementList extends ArrayList<Element> {
+        private void addAllInternally(int index, java.util.Collection<? extends Element> values) {
+            if (values.isEmpty()) return;
+            super.addAll(index, values);
+            if (elementIndexValid) for (Element element : values) if (element != null) registeredElements.put(element, Boolean.TRUE);
+        }
+        private void removeAllInternally(java.util.Collection<?> values) {
+            if (values.isEmpty()) return;
+            super.removeAll(values);
+            if (elementIndexValid) for (Object value : values) if (value instanceof Element element) registeredElements.remove(element);
+        }
+        private void replaceInternally(int index, Element value) {
+            Element previous = super.set(index, value);
+            if (elementIndexValid) {
+                if (previous != value && !containsIdentity(previous)) registeredElements.remove(previous);
+                if (value != null) registeredElements.put(value, Boolean.TRUE);
+            }
+        }
+        private boolean containsIdentity(Element target) { for (Element element : this) if (element == target) return true; return false; }
+        private int lastIndexOfIdentity(Element target) { for (int i = size() - 1; i >= 0; i--) if (get(i) == target) return i; return -1; }
+        private void clearInternally() { super.clear(); registeredElements.clear(); elementIndexValid = true; }
+        private void changed() { elementIndexValid = false; }
+        @Override public boolean add(Element value) { boolean changed = super.add(value); if (changed) this.changed(); return changed; }
+        @Override public void add(int index, Element value) { super.add(index, value); changed(); }
+        @Override public boolean addAll(java.util.Collection<? extends Element> values) { boolean changed = super.addAll(values); if (changed) this.changed(); return changed; }
+        @Override public boolean addAll(int index, java.util.Collection<? extends Element> values) { boolean changed = super.addAll(index, values); if (changed) this.changed(); return changed; }
+        @Override public Element set(int index, Element value) { Element previous = super.set(index, value); changed(); return previous; }
+        @Override public Element remove(int index) { Element previous = super.remove(index); changed(); return previous; }
+        @Override public boolean remove(Object value) { boolean changed = super.remove(value); if (changed) this.changed(); return changed; }
+        @Override public void clear() { super.clear(); changed(); }
+        @Override public boolean removeAll(java.util.Collection<?> values) { try { return super.removeAll(values); } finally { changed(); } }
+        @Override public boolean retainAll(java.util.Collection<?> values) { try { return super.retainAll(values); } finally { changed(); } }
+        @Override public boolean removeIf(java.util.function.Predicate<? super Element> filter) { try { return super.removeIf(filter); } finally { changed(); } }
+        @Override protected void removeRange(int from, int to) { super.removeRange(from, to); changed(); }
+        @Override public void sort(java.util.Comparator<? super Element> comparator) { try { super.sort(comparator); } finally { changed(); } }
+        @Override public void replaceAll(java.util.function.UnaryOperator<Element> operator) { try { super.replaceAll(operator); } finally { changed(); } }
+        @Override public List<Element> subList(int from, int to) { return new TrackedSubList(super.subList(from, to)); }
+    }
+
+    private final class TrackedSubList extends AbstractList<Element> implements RandomAccess {
+        private final List<Element> delegate;
+        private TrackedSubList(List<Element> delegate) { this.delegate = delegate; }
+        @Override public Element get(int index) { return delegate.get(index); }
+        @Override public int size() { return delegate.size(); }
+        @Override public Element set(int index, Element value) { try { return delegate.set(index, value); } finally { elementIndexValid = false; } }
+        @Override public void add(int index, Element value) { delegate.add(index, value); modCount++; elementIndexValid = false; }
+        @Override public Element remove(int index) { Element value = delegate.remove(index); modCount++; elementIndexValid = false; return value; }
+        @Override public java.util.ListIterator<Element> listIterator(int index) {
+            var iterator = delegate.listIterator(index);
+            return new java.util.ListIterator<>() {
+                public boolean hasNext() { return iterator.hasNext(); }
+                public Element next() { return iterator.next(); }
+                public boolean hasPrevious() { return iterator.hasPrevious(); }
+                public Element previous() { return iterator.previous(); }
+                public int nextIndex() { return iterator.nextIndex(); }
+                public int previousIndex() { return iterator.previousIndex(); }
+                public void remove() { iterator.remove(); elementIndexValid = false; }
+                public void set(Element value) { iterator.set(value); elementIndexValid = false; }
+                public void add(Element value) { iterator.add(value); elementIndexValid = false; }
+            };
+        }
+        @Override public List<Element> subList(int from, int to) { return new TrackedSubList(delegate.subList(from, to)); }
     }
 }

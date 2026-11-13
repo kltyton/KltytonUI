@@ -87,7 +87,7 @@ public class Audio extends Element {
     }
 
     // --------------------------------------------------------------
-    // HTMLAudioElement IDL（供 JS 桥 / KubeJS 直调）
+    // HTMLAudioElement IDL（供 JS 桥调用）
 
     public void load() {
         syncFromAttributes();

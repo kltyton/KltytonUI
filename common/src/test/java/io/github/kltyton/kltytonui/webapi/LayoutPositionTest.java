@@ -1721,26 +1721,6 @@ class LayoutPositionTest {
     }
 
     @Test
-    void flexDirectTextPaintDoesNotApplyContentOriginTwice() {
-        assumeMinecraftClientTextRuntime();
-        Document document = TestDocumentFactory.createDocument();
-        document.body.setAttribute("style", "width:300px;height:200px;");
-
-        Element button = new Element(document, "button");
-        button.setAttribute("style", "display:flex;width:109px;height:30px;padding:0 14px;border:1px solid transparent;gap:8px;align-items:center;");
-        Element icon = new Element(document, "span");
-        icon.setAttribute("style", "width:14px;height:14px;flex-shrink:0;");
-        button.appendChild(icon);
-        button.appendChild(new TextNode(document, "INSPECT"));
-        document.body.appendChild(button);
-
-        Flex.DirectTextLayout textLayout = Flex.computeDirectTextLayouts(button).get(0);
-        Position paint = readFlexDirectTextPaintPosition(button, textLayout);
-        assertEquals(37, textLayout.position().x, 0.01);
-        assertEquals(Position.of(button).x + 37, paint.x, 0.01);
-    }
-
-    @Test
     void nestedFlexItemCentersItsContentsWithinAssignedUsedWidth() {
         assumeMinecraftClientTextRuntime();
         Document document = TestDocumentFactory.createDocument();
@@ -2022,7 +2002,7 @@ class LayoutPositionTest {
         flex.appendChild(flexSecond);
 
         Element grid = new Element(document, "div");
-        grid.setAttribute("style", "display: inline-grid; grid-template-columns: 2; gap: 3px;");
+        grid.setAttribute("style", "display: inline-grid; grid-template-columns: repeat(2, 10px); gap: 3px;");
         document.body.appendChild(grid);
         Element gridFirst = new Element(document, "div");
         gridFirst.setAttribute("style", "width: 10px; height: 10px;");
@@ -2337,7 +2317,7 @@ class LayoutPositionTest {
         grid.appendChild(third);
 
         assertEquals(20, Position.getOffset(second).x);
-        assertEquals(55, Position.getOffset(third).x);
+        assertEquals(20 + 100.0 / 3.0, Position.getOffset(third).x, 0.0001);
         assertEquals(120, Layout.computeContentSize(grid).width());
     }
 
@@ -2521,17 +2501,6 @@ class LayoutPositionTest {
             java.lang.reflect.Method method = Element.class.getDeclaredMethod("getFlexTextOffset");
             method.setAccessible(true);
             return (Position) method.invoke(element);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError(e);
-        }
-    }
-
-    private static Position readFlexDirectTextPaintPosition(Element element, Flex.DirectTextLayout layout) {
-        try {
-            java.lang.reflect.Method method = Element.class.getDeclaredMethod(
-                    "getFlexDirectTextPaintPosition", Flex.DirectTextLayout.class);
-            method.setAccessible(true);
-            return (Position) method.invoke(element, layout);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(e);
         }

@@ -44,6 +44,21 @@ public final class NormalFlow {
         return getOrComputeFlowLayout(element, lineLimit).metrics().contentSize();
     }
 
+    public static Position computeStaticBlockPosition(Element element) {
+        Element parent = element.parentElement;
+        if (parent == null) return Position.ZERO;
+        Box box = Box.of(parent);
+        FlowState state = obtainState(box.innerSize().width(), null);
+        try {
+            List<Node> nodes = parent.getRenderChildNodes();
+            for (int i = 0; i < nodes.size() && nodes.get(i) != element; i++) layoutChild(parent, nodes, i, state);
+            if (state.cursorX > 0 || state.lineHeight > 0) commitLineBreak(state);
+            return new Position(box.offset("left"), box.offset("top") + state.cursorY);
+        } finally {
+            releaseState(state);
+        }
+    }
+
     public static List<TextRunLayout> computeTextRuns(Element element) {
         return getOrComputeFlowLayout(element, resolveLineLimit(element)).textRuns();
     }
@@ -87,28 +102,34 @@ public final class NormalFlow {
     }
 
     private static double resolveLineLimit(Element element) {
+        if (Size.isMinContentMeasurementContext()) return 0.000001;
         Style style = element.getComputedStyle();
-        CssLength widthLength = style.widthLength();
-        if (Size.isNaturalMeasurementContext() && !widthLength.hasNumber()
-                && !Size.hasNaturalWidthConstraint(element)) {
+        Box box = Box.of(element);
+        double horizontalBox = box.getBorderHorizontal() + box.getPaddingHorizontal();
+        boolean natural = Size.isNaturalMeasurementContext();
+        Size used = natural || "inline".equals(style.display) ? null : element.getRenderer().size.get();
+        if (used != null) return Math.max(0, used.width() - horizontalBox);
+        double parentWidth = Size.getScaleWidth(element);
+        if ("inline".equals(normalizeDisplay(style.display)) && element.parentElement != null) {
+            double parentLimit = resolveLineLimit(element.parentElement);
+            if (parentLimit > 0) parentWidth = parentLimit;
+        }
+        Double explicitWidth = style.widthLength().resolve(parentWidth);
+        Double maxWidth = style.maxWidthLength().resolve(parentWidth);
+        if (natural && explicitWidth == null && maxWidth == null && !Size.hasNaturalWidthConstraint(element)) {
             return 0;
         }
-        Double explicitWidth = widthLength.numberValue();
-        String display = normalizeDisplay(style.display);
-        if (explicitWidth == null && "inline".equals(display) && element.parentElement != null) {
-            double parentLimit = resolveLineLimit(element.parentElement);
-            if (parentLimit > 0) return parentLimit;
+        double resolved = explicitWidth == null ? parentWidth : explicitWidth;
+        if (explicitWidth != null && style.isBorderBox()) resolved -= horizontalBox;
+        if (maxWidth != null) {
+            double maxContent = Math.max(0, maxWidth - (style.isBorderBox() ? horizontalBox : 0));
+            resolved = Math.min(resolved, maxContent);
         }
-        if (explicitWidth != null) {
-            double percentBasis = widthLength.isPercent() ? Size.getScaleWidth(element) : 0;
-            double resolved = widthLength.resolveOr(explicitWidth, percentBasis);
-            if (style.isBorderBox()) {
-                Box box = Box.of(element);
-                resolved -= box.getBorderHorizontal() + box.getPaddingHorizontal();
-            }
-            return Math.max(0, resolved);
+        Double minWidth = style.minWidthLength().resolve(parentWidth);
+        if (minWidth != null) {
+            resolved = Math.max(resolved, minWidth - (style.isBorderBox() ? horizontalBox : 0));
         }
-        return Math.max(0, Size.getScaleWidth(element));
+        return Math.max(0, resolved);
     }
 
     // FlowState 池：computeFlow 可经子元素位置查询重入，所以用栈式池而非单例。
@@ -421,9 +442,12 @@ public final class NormalFlow {
             double contentHeight = Math.max(0,
                     outerSize.height() - box.getMarginVertical() - box.getBorderVertical() - box.getPaddingVertical());
             double crossOffset = 0;
-            if (Layout.isFlexDisplay(element.getComputedStyle().display)
+            // A button centers its text within a taller minimum-height box;
+            // anchoring its baseline at the top adds spurious descent to the parent line.
+            if ((textControl && "BUTTON".equalsIgnoreCase(element.tagName))
+                    || (Layout.isFlexDisplay(element.getComputedStyle().display)
                     && Flex.of(element).flexDirection.contains("row")
-                    && Flex.of(element).alignItems.is("center")) {
+                    && Flex.of(element).alignItems.is("center"))) {
                 crossOffset = Math.max(0, (contentHeight - text.lineHeight) / 2.0d);
             }
             double baseline = box.getMarginTop() + box.getBorderTop() + box.getPaddingTop()
@@ -734,11 +758,7 @@ public final class NormalFlow {
 
     private static boolean isReplacedLikeElement(Element element) {
         if (element == null) return true;
-        String tagName = element.tagName == null ? "" : element.tagName.trim().toUpperCase();
-        return switch (tagName) {
-            case "IMG", "INPUT", "TEXTAREA", "SELECT", "CANVAS", "VIDEO", "AUDIO", "IFRAME", "BUTTON" -> true;
-            default -> false;
-        };
+        return Layout.isReplacedElement(element);
     }
 
     public record TextRunLayout(TextNode node, Element owner, Text text, double x, double y, List<String> lines,

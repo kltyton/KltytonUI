@@ -31,6 +31,7 @@ public final class TextMetrics {
         out.whiteSpace = base.whiteSpace;
         out.wordBreak = base.wordBreak;
         out.overflowWrap = base.overflowWrap;
+        out.hyphenBreak = base.hyphenBreak;
         out.textIndent = 0;
         out.letterSpacing = base.letterSpacing;
         out.size = null;

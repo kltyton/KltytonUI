@@ -17,6 +17,14 @@ img, texture {
     overflow: hidden;
 }
 
+model {
+    width: 128px;
+    height: 128px;
+    overflow: hidden;
+    user-select: none;
+    cursor: pointer;
+}
+
 a {
     color: #0000EE;
     cursor: pointer;
@@ -97,7 +105,7 @@ pre {
 
 input {
     border-bottom: 1px solid #808080;
-    width: 64px;
+    width: auto;
     overflow: hidden;
 }
 
@@ -148,9 +156,10 @@ slot {
     position: relative;
     width: 18px;
     height: 18px;
-    background-image: url("kltytonui/img/gui/area.png");
+    background-image: url("kltytonui/img/gui/slot.svg");
     background-size: 100% 100%;
     background-repeat: no-repeat;
+    image-rendering: pixelated;
     pointer-events: none;
 }
 
@@ -179,69 +188,85 @@ ingredient > item {
 container[layout="preset:player"] {
     --kui-player-gap: 1px;
     --kui-player-columns: 9;
-    display: grid;
     gap: var(--kui-player-gap);
-    grid-template-columns: var(--kui-player-columns);
-    justify-items: stretch;
-    align-items: stretch;
+    grid-template-columns: repeat(var(--kui-player-columns), auto);
 }
 
-container[layout="preset:player"] > slot[slot-index="9"] { grid-column: 1; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="10"] { grid-column: 2; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="11"] { grid-column: 3; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="12"] { grid-column: 4; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="13"] { grid-column: 5; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="14"] { grid-column: 6; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="15"] { grid-column: 7; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="16"] { grid-column: 8; grid-row: 2; }
-container[layout="preset:player"] > slot[slot-index="17"] { grid-column: 9; grid-row: 2; }
-
-container[layout="preset:player"] > slot[slot-index="18"] { grid-column: 1; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="19"] { grid-column: 2; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="20"] { grid-column: 3; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="21"] { grid-column: 4; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="22"] { grid-column: 5; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="23"] { grid-column: 6; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="24"] { grid-column: 7; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="25"] { grid-column: 8; grid-row: 3; }
-container[layout="preset:player"] > slot[slot-index="26"] { grid-column: 9; grid-row: 3; }
-
-container[layout="preset:player"] > slot[slot-index="27"] { grid-column: 1; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="28"] { grid-column: 2; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="29"] { grid-column: 3; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="30"] { grid-column: 4; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="31"] { grid-column: 5; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="32"] { grid-column: 6; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="33"] { grid-column: 7; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="34"] { grid-column: 8; grid-row: 4; }
-container[layout="preset:player"] > slot[slot-index="35"] { grid-column: 9; grid-row: 4; }
-
-container[layout="preset:player"] > slot[slot-index="0"] { grid-column: 1; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="1"] { grid-column: 2; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="2"] { grid-column: 3; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="3"] { grid-column: 4; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="4"] { grid-column: 5; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="5"] { grid-column: 6; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="6"] { grid-column: 7; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="7"] { grid-column: 8; grid-row: 5; }
-container[layout="preset:player"] > slot[slot-index="8"] { grid-column: 9; grid-row: 5; }
+container[layout="preset:player"] > slot:is(
+    [slot-index="0"], [slot-index="1"], [slot-index="2"],
+    [slot-index="3"], [slot-index="4"], [slot-index="5"],
+    [slot-index="6"], [slot-index="7"], [slot-index="8"]
+) {
+    order: 1;
+}
 
 /* recipe 布局由 CSS 预设控制 */
 recipe {
     --kui-recipe-gap: 2px;
     --kui-recipe-slot-size: 18px;
     --kui-recipe-columns: 5;
+    --kui-recipe-arrow-track: 24px;
     display: grid;
+    position: relative;
     gap: var(--kui-recipe-gap);
-    grid-template-columns: var(--kui-recipe-columns);
+    grid-template-columns: repeat(var(--kui-recipe-columns), var(--kui-recipe-slot-size));
     justify-items: stretch;
     align-items: stretch;
+}
+
+recipe::before {
+    content: "";
+    display: none;
+    position: absolute;
+    z-index: 1;
+    width: 22px;
+    height: 15px;
+    top: calc(var(--kui-recipe-slot-size) + var(--kui-recipe-gap) + 1.5px);
+    background-image: url("kltytonui/img/gui/arrow.svg");
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    image-rendering: pixelated;
+    pointer-events: none;
+}
+
+recipe[data-recipe-layout="crafting_shaped"]::before,
+recipe[data-recipe-layout="crafting_shapeless"]::before,
+recipe[data-recipe-layout="smithing"]::before {
+    display: block;
+    left: calc(var(--kui-recipe-slot-size) + var(--kui-recipe-slot-size) + var(--kui-recipe-slot-size) + var(--kui-recipe-gap) + var(--kui-recipe-gap) + var(--kui-recipe-gap));
+}
+
+recipe[data-recipe-layout="smelting_family"]::before,
+recipe[data-recipe-layout="stonecutting"]::before {
+    display: block;
+    left: calc(var(--kui-recipe-slot-size) + var(--kui-recipe-gap));
+}
+
+recipe[data-recipe-layout="fallback"]::before {
+    display: block;
+    left: calc(var(--kui-recipe-slot-size) + var(--kui-recipe-slot-size) + var(--kui-recipe-slot-size) + var(--kui-recipe-slot-size) + var(--kui-recipe-gap) + var(--kui-recipe-gap) + var(--kui-recipe-gap));
 }
 
 recipe > .kui-recipe-slot {
     width: var(--kui-recipe-slot-size);
     height: var(--kui-recipe-slot-size);
     --kui-slot-interactive: 0;
+}
+
+recipe[data-recipe-layout="crafting_shaped"],
+recipe[data-recipe-layout="crafting_shapeless"],
+recipe[data-recipe-layout="smithing"] {
+    grid-template-columns: repeat(3, var(--kui-recipe-slot-size)) var(--kui-recipe-arrow-track) var(--kui-recipe-slot-size);
+}
+
+recipe[data-recipe-layout="smelting_family"],
+recipe[data-recipe-layout="stonecutting"] {
+    grid-template-columns: var(--kui-recipe-slot-size) var(--kui-recipe-arrow-track) var(--kui-recipe-slot-size);
+}
+
+recipe[data-recipe-layout="stonecutting"]::before,
+recipe[data-recipe-layout="smithing"]::before {
+    top: calc(var(--kui-recipe-gap) + 1.5px);
 }
 
 recipe[data-recipe-layout="crafting_shaped"] > .kui-recipe-output,
@@ -268,28 +293,31 @@ recipe[data-recipe-layout="crafting_shapeless"] > .kui-recipe-input[data-i="7"] 
 recipe[data-recipe-layout="crafting_shaped"] > .kui-recipe-input[data-i="8"],
 recipe[data-recipe-layout="crafting_shapeless"] > .kui-recipe-input[data-i="8"] { grid-column: 3; grid-row: 3; }
 
-recipe[data-recipe-layout="smelting_family"] {
-    --kui-recipe-columns: 4;
-}
 recipe[data-recipe-layout="smelting_family"] > .kui-recipe-input[data-i="0"] { grid-column: 1; grid-row: 1; }
-recipe[data-recipe-layout="smelting_family"] > .kui-recipe-fuel[data-i="0"] { grid-column: 2; grid-row: 2; }
-recipe[data-recipe-layout="smelting_family"] > .kui-recipe-output[data-i="0"] { grid-column: 4; grid-row: 2; }
-
-recipe[data-recipe-layout="smithing"] {
-    --kui-recipe-columns: 5;
+recipe[data-recipe-layout="smelting_family"] > .kui-recipe-fuel[data-i="0"] { grid-column: 1; grid-row: 3; }
+recipe[data-recipe-layout="smelting_family"] > .kui-recipe-output[data-i="0"] { grid-column: 3; grid-row: 2; }
+recipe[data-recipe-layout="smelting_family"]::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    width: 13px;
+    height: 13px;
+    left: 2px;
+    top: calc(var(--kui-recipe-slot-size) + var(--kui-recipe-gap) + 2px);
+    background-image: url("kltytonui/img/gui/flame.svg");
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    image-rendering: pixelated;
+    pointer-events: none;
 }
+
 recipe[data-recipe-layout="smithing"] > .kui-recipe-template[data-i="0"] { grid-column: 1; grid-row: 2; }
 recipe[data-recipe-layout="smithing"] > .kui-recipe-input[data-role="input"][data-i="0"] { grid-column: 2; grid-row: 2; }
 recipe[data-recipe-layout="smithing"] > .kui-recipe-addition[data-i="0"] { grid-column: 3; grid-row: 2; }
 recipe[data-recipe-layout="smithing"] > .kui-recipe-output[data-i="0"] { grid-column: 5; grid-row: 2; }
 
-recipe[data-recipe-layout="stonecutting"] {
-    --kui-recipe-columns: 4;
-}
-recipe[data-recipe-layout="stonecutting"] > .kui-recipe-input[data-group="absolute"][data-i="0"] { grid-column: 1; grid-row: 2; }
-recipe[data-recipe-layout="stonecutting"] > .kui-recipe-output[data-group="list"][data-i="0"] { grid-column: 4; grid-row: 1; }
-recipe[data-recipe-layout="stonecutting"] > .kui-recipe-output[data-group="list"][data-i="1"] { grid-column: 4; grid-row: 2; }
-recipe[data-recipe-layout="stonecutting"] > .kui-recipe-output[data-group="list"][data-i="2"] { grid-column: 4; grid-row: 3; }
+recipe[data-recipe-layout="stonecutting"] > .kui-recipe-input[data-i="0"] { grid-column: 1; grid-row: 2; }
+recipe[data-recipe-layout="stonecutting"] > .kui-recipe-output[data-i="0"] { grid-column: 3; grid-row: 2; }
 
 recipe[data-recipe-layout="fallback"] {
     --kui-recipe-columns: 6;

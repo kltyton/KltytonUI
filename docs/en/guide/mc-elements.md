@@ -59,26 +59,29 @@ CSS custom properties take precedence over HTML attributes. A single candidate d
 
 ## `<recipe>`: Recipe preview
 
-`<recipe>` creates a read-only preview by looking up the recipe ID in the current world's recipe manager:
+`<recipe>` supports two query forms, and both require `type`. Element text first follows the legacy contract and looks up an exact recipe ID; only when that ID does not exist is the text scanned as an output item ID. Use the `output` attribute to select output matching explicitly and avoid recipe/item ID ambiguity:
 
 ```html
-<recipe type="crafting_shaped">minecraft:crafting_table</recipe>
+<recipe type="crafting_shaped">minecraft:stick</recipe>
+<recipe type="smelting" output="minecraft:iron_ingot"></recipe>
 ```
 
-Write the recipe ID as the element's text. `type` is required and must match the recipe category:
+The first form preserves exact recipe-ID lookup; if no recipe has that ID, the text can also be used to scan by output item ID. The `output` form always scans by output and can show multiple matches, sorted by recipe ID and cycled once per second. An existing exact recipe ID takes precedence even when an item with the same ID has other recipes; explicit `output` selects output scanning. Matching compares only the output item ID, while the preview preserves each recipe's output count and item data. Supported types:
 
 | `type` | Preview |
 | --- | --- |
 | `crafting_shaped` | 3×3 crafting inputs and output |
 | `crafting_shapeless` | 3×3 shapeless crafting inputs and output |
 | `smelting`, `blasting`, `smoking`, `campfire_cooking` | Input, fuel candidates, and output |
-| `stonecutting` | Input and up to three matching stonecutter outputs |
+| `stonecutting` | Input and the specified output |
 | `smithing` | Smithing template, input, addition, and output |
 | `fallback` | Other recipes: up to eight inputs and the output |
 
 Generated `<slot>` elements are for display only: they occupy no menu slots and cannot be clicked or manipulated. They use the regular `<slot>` CSS properties. The recipe uses CSS Grid by default; adjust its gap, slot size, and column count with `--kui-recipe-gap`, `--kui-recipe-slot-size`, and `--kui-recipe-columns`. Generated slots carry role classes such as `kui-recipe-input` and `kui-recipe-output`, which can be styled separately.
 
-If `type` is missing or invalid, the recipe cannot be found, or the type does not match, an error is logged and written to `data-recipe-error`; on success that attribute is empty. The layout type is written to `data-recipe-layout` and can be used in CSS selectors. A preview cannot be generated when no client world or recipe manager is available.
+When several recipes match, they are sorted by recipe ID and the whole preview switches every 1000 milliseconds. Hovering the recipe or any descendant pauses rotation; after leaving, rotation resumes after a full second. A single match stays static. Changing the text or `type`, switching worlds, or reloading recipe data resets the preview.
+
+Missing or invalid `type`, invalid output IDs, and queries with no matches clear the previous preview and report an error in the log and `data-recipe-error`; on success that attribute is empty. The layout type is written to `data-recipe-layout` and can be used in CSS selectors. A preview cannot be generated when no client world or recipe manager is available. The 26.1 targets currently read recipes from the local server and support singleplayer worlds only.
 
 ## Relationship to `<slot>`
 

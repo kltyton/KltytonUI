@@ -6,14 +6,12 @@ import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.screen.KuiLinkedScreen;
 import io.github.kltyton.kltytonui.world.WorldWindow;
 import io.github.kltyton.kltytonui.KltytonUI;
-import io.github.kltyton.kltytonui.registry.annotation.KJSBindings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@KJSBindings(value = "KltytonUI", isClient = true)
 public class KltytonUIClientUtil {
     public static Window getWindow() {
         return Window.window;

@@ -1,9 +1,12 @@
 package io.github.kltyton.kltytonui.element;
 
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
+import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.render.Drawer;
+import io.github.kltyton.kltytonui.render.DevicePixelGrid;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.registry.annotation.ElementRegister;
 import io.github.kltyton.kltytonui.render.Base;
@@ -71,18 +74,16 @@ public class Iframe extends Element {
     private static final int DEFAULT_WIDTH = 300;
     private static final int DEFAULT_HEIGHT = 150;
 
-    /** Upper bound on the hosted raster, so a runaway layout cannot allocate gigabytes. */
-    private static final int MAX_VIEWPORT = 4096;
+    /** Per-edge limit used when the window framebuffer cannot be read. */
+    private static final int DEFAULT_VIEWPORT_LIMIT = 4096;
 
     /**
-     * Upper bound on the raster <em>area</em>.
+     * Hard ceiling on the per-edge limit, whatever the display reports.
      *
-     * <p>A capture costs its area in encode, decode, transfer and upload time, and an iframe
-     * sized in device pixels can ask for several million of them. Past this the raster is
-     * scaled down (zoom follows, so the page's CSS viewport stays exact) rather than letting
-     * one large element halve the frame rate of everything else.</p>
+     * <p>Every raster pixel costs GPU and arena memory, and a texture wider than this is not
+     * something the capture pipeline can carry anyway.</p>
      */
-    private static final double MAX_CAPTURE_PIXELS = 1_200_000.0;
+    private static final int ABSOLUTE_VIEWPORT_LIMIT = 8192;
 
     /** WebView2 clamps ZoomFactor to this range by default and the SDK cannot widen it. */
     private static final double MIN_ZOOM = 0.25d;
@@ -91,11 +92,7 @@ public class Iframe extends Element {
     /** Bounds for {@code capture-scale}; below this the page stops being readable. */
     private static final double MIN_CAPTURE_SCALE = 0.25d;
 
-    /**
-     * Capture interval. This is only an upper bound on the request rate — the host never
-     * starts a new capture while one is in flight, so a heavy page self-throttles.
-     * 16 ms targets 60 fps for the codec to keep up with.
-     */
+    /** Requested cadence before native shared-budget and static-page throttling. */
     private static final int FRAME_INTERVAL_MS = 16;
 
     /** Ticks without a draw (20 Hz) before the capture loop is paused. */
@@ -112,10 +109,18 @@ public class Iframe extends Element {
     private boolean backendUnavailable;
     private CompletableFuture<KuiWebViewService.View> pendingView;
     private KuiWebViewService.View view;
+    private io.github.kltyton.kltytonui.webview.WebViewBridge bridge;
+
+    /** Registers Java capabilities for explicitly trusted WebView pages. */
+    @HideFromScript
+    public io.github.kltyton.kltytonui.webview.WebViewBridge bridge() {
+        if (bridge == null) bridge = new io.github.kltyton.kltytonui.webview.WebViewBridge();
+        return bridge;
+    }
     private int viewportWidth;
     private int viewportHeight;
     private double viewportZoom = Double.NaN;
-    /** True while the raster is being scaled down by {@link #MAX_CAPTURE_PIXELS}. */
+    /** True while the adaptive raster is being scaled down by the framebuffer area limit. */
     private boolean rasterAreaCapped;
 
     private KuiWebViewService.Channel viewChannel;
@@ -173,10 +178,14 @@ public class Iframe extends Element {
         super.setAttribute(name, value);
         if ("src".equalsIgnoreCase(name)) {
             requestedUrl = normalizeUrl(value);
-            if (view != null && requestedUrl != null) {
+            if (requestedUrl == null) {
+                releaseView();
+                destroyTexture();
+            } else if (view != null) {
                 activeUrl = requestedUrl;
                 view.navigate(requestedUrl);
                 view.setAutoCapture(true);
+                capturePaused = false;
             }
             if (document != null) {
                 document.markDirty(this, Drawer.REPAINT);
@@ -201,6 +210,12 @@ public class Iframe extends Element {
         if ("src".equalsIgnoreCase(name)) {
             requestedUrl = null;
             releaseView();
+            destroyTexture();
+        } else if ("capture".equalsIgnoreCase(name)) {
+            captureQuality = KuiWebViewService.CAPTURE_AUTO;
+            if (view != null) view.setCaptureQuality(captureQuality);
+        } else if ("capture-scale".equalsIgnoreCase(name)) {
+            captureScale = 1.0d;
         }
         if ("width".equalsIgnoreCase(name) || "height".equalsIgnoreCase(name)) {
             if (document != null) {
@@ -248,6 +263,7 @@ public class Iframe extends Element {
             return;
         }
         tickView();
+        if (bridge != null) bridge.tick(view);
         tickIdleCapture();
         tickPointerLeave();
     }
@@ -345,6 +361,7 @@ public class Iframe extends Element {
             viewportZoom = Double.NaN;
             capturePaused = false;
             view.setCaptureQuality(captureQuality);
+            view.setFrameInterval(requestedIntervalMs);
             openChannel();
         }
         if (view == null) {
@@ -359,6 +376,7 @@ public class Iframe extends Element {
             activeUrl = requestedUrl;
             view.navigate(activeUrl);
             view.setAutoCapture(true);
+            capturePaused = false;
         }
         resizeViewportIfNeeded();
     }
@@ -379,11 +397,13 @@ public class Iframe extends Element {
         activeUrl = url;
         int rasterWidth = (int) viewport[0];
         int rasterHeight = (int) viewport[1];
+        int initialCaptureQuality = captureQuality;
         pendingView = CompletableFuture.supplyAsync(
-                () -> service.create(url, rasterWidth, rasterHeight, false, FRAME_INTERVAL_MS));
+                () -> service.create(url, rasterWidth, rasterHeight, false, FRAME_INTERVAL_MS, initialCaptureQuality));
     }
 
     private void releaseView() {
+        if (bridge != null) bridge.detach();
         activeUrl = null;
         pressedButtons = 0;
         // Drop the update stream first: closing the view unmaps the block behind it.
@@ -393,7 +413,19 @@ public class Iframe extends Element {
             view = null;
         }
         if (pendingView != null) {
-            pendingView.cancel(true);
+            pendingView.whenComplete((created, failure) -> {
+                if (failure != null) {
+                    KltytonUI.LOGGER.warn("[KUI WebView] abandoned view creation failed", failure);
+                } else if (created != null) {
+                    KuiServices.client().executeOnClientThread(() -> {
+                        try {
+                            created.close();
+                        } catch (RuntimeException closeFailure) {
+                            KltytonUI.LOGGER.warn("[KUI WebView] abandoned view close failed", closeFailure);
+                        }
+                    });
+                }
+            });
             pendingView = null;
         }
         viewportWidth = 0;
@@ -431,13 +463,8 @@ public class Iframe extends Element {
      */
     private double[] desiredViewport() {
         Size contentSize = Box.of(this).innerSize();
-        // Device pixels per document CSS pixel. getViewportScaleX() is only GUI pixels
-        // per CSS pixel, which is the wrong factor: the raster has to be sized in real
-        // device pixels or the page is rendered below screen resolution and upscaled.
-        double deviceScale = document == null ? 1.0d : document.getViewport().scissorScale();
-        if (!(deviceScale > 0.0d) || !Double.isFinite(deviceScale)) {
-            deviceScale = 1.0d;
-        }
+        // Device pixels per document CSS pixel.
+        double deviceScale = documentScale();
         double boxWidth = Math.max(1.0d, contentSize.width());
         double boxHeight = Math.max(1.0d, contentSize.height());
         double scale = Math.max(MIN_CAPTURE_SCALE, Math.min(1.0d, captureScale));
@@ -445,24 +472,62 @@ public class Iframe extends Element {
         double rasterHeightExact = boxHeight * deviceScale * scale;
         // Explicit lossless and raw-stream captures preserve device resolution. Adaptive
         // modes may reduce the raster area while keeping the page's CSS viewport exact.
+        final int[] window = windowDeviceSize();
         double area = rasterWidthExact * rasterHeightExact;
+        double areaLimit = captureAreaLimit(window);
         rasterAreaCapped = captureQuality != KuiWebViewService.CAPTURE_LOSSLESS
-                && captureQuality != KuiWebViewService.CAPTURE_STREAM && area > MAX_CAPTURE_PIXELS;
+                && captureQuality != KuiWebViewService.CAPTURE_STREAM && area > areaLimit;
         if (rasterAreaCapped) {
-            double shrink = Math.sqrt(MAX_CAPTURE_PIXELS / area);
+            double shrink = Math.sqrt(areaLimit / area);
             rasterWidthExact *= shrink;
             rasterHeightExact *= shrink;
         }
-        int rasterWidth = clampViewport((int) Math.round(rasterWidthExact));
-        int rasterHeight = clampViewport((int) Math.round(rasterHeightExact));
+        final int edgeLimit = viewportEdgeLimit(window);
+        int rasterWidth = clampViewport((int) Math.round(rasterWidthExact), edgeLimit);
+        int rasterHeight = clampViewport((int) Math.round(rasterHeightExact), edgeLimit);
         // Derive zoom from the raster we actually got, so a clamped raster still yields
         // the correct CSS viewport.
         double zoom = clampZoom(rasterWidth / boxWidth);
         return new double[]{rasterWidth, rasterHeight, zoom};
     }
 
-    private static int clampViewport(int value) {
-        return Math.max(1, Math.min(MAX_VIEWPORT, value));
+    private static int clampViewport(int value, int limit) {
+        return Math.max(1, Math.min(limit, value));
+    }
+
+    /**
+     * The window's framebuffer size in device pixels, or {@code null} when it cannot be read.
+     *
+     * <p>Both ceilings below are derived from it, which is what keeps the raster tied to the
+     * actual display instead of a hardcoded resolution.</p>
+     */
+    private static int[] windowDeviceSize() {
+        double width = KuiServices.client().getWindowWidth();
+        double height = KuiServices.client().getWindowHeight();
+        if (width >= 1.0d && height >= 1.0d && Double.isFinite(width) && Double.isFinite(height)) {
+            return new int[]{(int) Math.round(width), (int) Math.round(height)};
+        }
+        return null;
+    }
+
+    /** Area ceiling for the adaptive raster: the framebuffer area, or a 4096² fallback. */
+    private static double captureAreaLimit(int[] window) {
+        if (window == null) {
+            return (double) DEFAULT_VIEWPORT_LIMIT * DEFAULT_VIEWPORT_LIMIT;
+        }
+        return (double) window[0] * window[1];
+    }
+
+    /**
+     * Per-edge ceiling for the raster: the longer framebuffer edge, floored at 4096 and capped
+     * at 8192 so a nonsense window size cannot ask for an unbounded texture.
+     */
+    private static int viewportEdgeLimit(int[] window) {
+        if (window == null) {
+            return DEFAULT_VIEWPORT_LIMIT;
+        }
+        int edge = Math.max(window[0], window[1]);
+        return Math.max(DEFAULT_VIEWPORT_LIMIT, Math.min(ABSOLUTE_VIEWPORT_LIMIT, edge));
     }
 
     /** WebView2 clamps ZoomFactor to [0.25, 5] by default and this SDK exposes no way to widen it. */
@@ -551,10 +616,8 @@ public class Iframe extends Element {
         try {
             updates.drain(updateTarget);
         } catch (RuntimeException failure) {
-            // A failed apply must not take the frame down; the canvas simply stays as it is
-            // until the next update, and the reader re-syncs itself.
-            updates = null;
-            releaseChannel();
+            KltytonUI.LOGGER.warn("[KUI WebView] frame update failed; requesting a full refresh", failure);
+            updates.recoverAfterFailedApply();
         }
     }
 
@@ -571,16 +634,24 @@ public class Iframe extends Element {
             if (width <= 0 || height <= 0) {
                 return;
             }
-            if (nativeImage != null && nativeImage.getWidth() == width
+            if (nativeImage != null && texture != null && textureLocation != null
+                    && nativeImage.getWidth() == width
                     && nativeImage.getHeight() == height) {
                 return;
             }
             destroyTexture();
             nativeImage = new NativeImage(NativeImage.Format.RGBA, width, height, true);
             texture = KuiServices.render().createDynamicTexture("webview/" + uuid, nativeImage, true);
-            textureLocation = TextureKey.of("webview/"
+            TextureKey newLocation = TextureKey.of("webview/"
                     + UUID.nameUUIDFromBytes(uuid.toString().getBytes(StandardCharsets.UTF_8)));
-            KuiServices.render().registerTexture(texture, KuiServices.resources().textureLocation(textureLocation));
+            KuiServices.render().registerTexture(texture, KuiServices.resources().textureLocation(newLocation));
+            textureLocation = newLocation;
+        }
+
+        @Override
+        public boolean rectDirect(int x, int y, int width, int height, java.nio.ByteBuffer pixels, int byteOffset) {
+            if (nativeImage == null || texture == null || textureLocation == null) return false;
+            return KuiServices.render().uploadTexturePixels(texture, pixels, byteOffset, x, y, width, height);
         }
 
         @Override
@@ -602,17 +673,39 @@ public class Iframe extends Element {
         if (contentSize.width() <= 0 || contentSize.height() <= 0) {
             return;
         }
+        double scale = documentScale();
         ImageDrawer.draw(poseStack, textureLocation,
-                (float) contentPos.x, (float) contentPos.y,
-                (float) contentSize.width(), (float) contentSize.height(), true);
+                snap(contentPos.x, scale), snap(contentPos.y, scale),
+                snap(contentSize.width(), scale), snap(contentSize.height(), scale), true);
+    }
+
+    /** Rounds a document-space coordinate onto the device pixel grid. */
+    private static float snap(double value, double scale) {
+        if (!(scale > 0.0d) || !Double.isFinite(scale)) {
+            return (float) value;
+        }
+        return (float) DevicePixelGrid.snap(value, scale);
+    }
+
+    /** Device pixels per document pixel for this element's document. */
+    private double documentScale() {
+        double scale = document == null ? 1.0d : document.getViewport().scissorScale();
+        return scale > 0.0d && Double.isFinite(scale) ? scale : 1.0d;
     }
 
     private void destroyTexture() {
         if (texture != null) {
             try {
-                KuiServices.render().closeTexture(texture);
-            } catch (Exception ignored) {
+                if (textureLocation != null) {
+                    KuiServices.render().releaseTexture(KuiServices.resources().textureLocation(textureLocation));
+                } else {
+                    KuiServices.render().closeTexture(texture);
+                }
+            } catch (Exception failure) {
+                KltytonUI.LOGGER.warn("[KUI WebView] texture close failed", failure);
             }
+        } else if (nativeImage != null) {
+            nativeImage.close();
         }
         texture = null;
         nativeImage = null;

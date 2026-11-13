@@ -9,17 +9,17 @@ Pages use plain HTML/CSS/JS, with development documentation and debugging suppor
 - CurseForge: https://www.curseforge.com/minecraft/mc-mods/kltytonui
 - Modrinth: https://github.com/kltyton/KltytonUI
 
-Maven Central publication is being prepared. Use this configuration after the corresponding version is publicly available and its coordinate has been verified. The root `gradle.properties` contains the current source version.
+Use the Sighs Maven repository with the dependency for your loader and Minecraft version.
 ```groovy
 repositories {
-    mavenCentral()
+    maven { url = uri("https://maven.sighs.cc/repository/maven-public/") }
 }
 dependencies {
     implementation 'io.github.kltyton.kltytonui:KltytonUI-forge-1.20.1:<published-version>'
 }
 ```
 
-This example is for Forge 1.20.1. The source also provides Forge 1.18.2 / 1.19.2, Fabric 1.20.1 / 1.21.1 / 26.1, and NeoForge 1.21.1 / 26.1 / 26.2. Select the matching loader and Minecraft target. See [Maven publishing](guide/maven-publishing) for maintainer commands, signing, and upload preparation.
+This example is for Forge 1.20.1. The source also provides Forge 1.18.2 / 1.19.2, Fabric 1.20.1 / 1.21.1 / 26.1 / 26.2, and NeoForge 1.21.1 / 26.1 / 26.2. Select the matching loader and Minecraft target. See [Maven publishing](guide/maven-publishing) for maintainer commands, signing, and upload preparation.
 
 ## 2. Confirm It's Working
 
@@ -72,7 +72,7 @@ It's just an ordinary web page. Only three things need explaining:
 
 **There are no browser default styles**: `h2`, `p`, and `button` come with no appearance at all — font size, color, and spacing are all yours to write. For which CSS works and which gets ignored, see [HTML/CSS Coverage](guide/html-css-coverage).
 
-**Page scripts use the standalone Rhino runtime**: all supported targets provide page-script support and require their corresponding Rhino dependency. KubeJS mod bindings are available only on Forge 1.20.1 and NeoForge 1.21.1. See [Web API](guide/web-api) and [Mod API](guide/kltytonui-api) for the capabilities and target differences.
+KUI embeds NeonJS 0.1.4 for page scripts. See the [Web API](guide/web-api) and [Mod API](guide/kltytonui-api).
 
 **Paths**: the mod locates files by **logical path**, not disk location. If the file is at `<game directory>/kltytonui/screens/hello.html`, you write `screens/hello.html` in code — no `assets/...` prefix, no drive letters. Referencing CSS and images from inside a page works the same way. See [Resource Management](guide/resource-manager) for the rules.
 
@@ -87,7 +87,7 @@ The page you just wrote runs, but its styling is bare. Don't write CSS from scra
 <body class="ore-theme">
 ```
 
-Then apply class names: `<button class="button button-primary">`, `<div class="card">`, `<table class="table">`. The showcase page `kltytonui/theme/ore/example.html` (double-click it in the resource manager to open) demonstrates every component — just copy from it.
+Then apply class names: `<button class="button button-primary">`, `<div class="card">`, `<table class="table">`. The repository's `theme/ore/example.html` demonstrates the components; the distribution JAR does not include the example.
 
 To change colors and spacing, override the `--ore-*` variables directly (see Section 9 for how). Component list: [ore-theme.md](guide/ore-theme).
 
@@ -108,17 +108,7 @@ The HTML is written the same way for all four hosts; the only differences are wh
 
 ## 6. Driving the Page from Outside
 
-The page's internal `<script>` manipulating the DOM was covered above. External code first gets hold of the page, then uses the same Java API; the KubeJS example is for Forge 1.20.1 and NeoForge 1.21.1 only:
-
-```javascript
-// KubeJS client script
-var docs = KltytonUI.getDocument("screens/hello.html");   // note: returns a list
-if (docs.length > 0) {
-    var status = docs[0].getElementById("status");
-    status.textContent = "HP: 20";
-    status.setAttribute("class", "warning");
-}
-```
+Use the Java API on the client thread to find and update a page.
 
 ```java
 // Java
@@ -182,10 +172,10 @@ Two Ore theme files are especially important for AI. Give it these two and it ca
 - **`ore.css`**: the authoritative definition of all class names and `--ore-*` variables;
 - **`example.html`**: usage examples for every component.
 
-The logical paths of the two files are `/kltytonui/theme/ore/ore.css` and `kltytonui/theme/ore/example.html` respectively (double-clicking example in the resource manager shows all components live). Three options for getting the file contents:
+The stylesheet's logical path is `/kltytonui/theme/ore/ore.css`. The example remains in the repository and can be copied into your own resources for an in-game preview. Sources for the files:
 
 - GitHub raw: `https://raw.githubusercontent.com/kltyton/KltytonUI/main/common/src/main/resources/assets/kltytonui/kltytonui/kltytonui/theme/ore/ore.css` (for example.html, swap in the file name from the same directory);
-- The mod jar: a jar is essentially a zip; after extracting, look in `assets/kltytonui/kltytonui/kltytonui/theme/ore/`;
+- The mod jar: the stylesheet is under `assets/kltytonui/kltytonui/kltytonui/theme/ore/`;
 - If you have a local clone of the repo: `common/src/main/resources/assets/kltytonui/kltytonui/kltytonui/theme/ore/`.
 
 What to tell the AI, roughly:

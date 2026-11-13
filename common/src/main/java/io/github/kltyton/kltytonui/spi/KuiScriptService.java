@@ -2,16 +2,13 @@ package io.github.kltyton.kltytonui.spi;
 
 import io.github.kltyton.kltytonui.event.Event;
 import io.github.kltyton.kltytonui.init.Document;
-import dev.latvian.mods.rhino.Context;
 
 import java.util.function.Consumer;
 
 /**
  * Loader-side JavaScript execution.
  *
- * <p>Every supported client target supplies the required standalone Rhino
- * runtime through this interface. Optional KubeJS integration may expose
- * additional bindings, but page execution never depends on KubeJS.</p>
+ * <p>Page execution uses a document-owned NeonJS realm.</p>
  */
 public interface KuiScriptService {
     /** Evaluates JavaScript with the given event (may be {@code null}) and source label. */
@@ -30,11 +27,6 @@ public interface KuiScriptService {
     default void warmUp() {
     }
 
-    /** Enters the loader-compatible Rhino context, including host-object wrapping. */
-    default Context enterRhinoContext() {
-        return null;
-    }
-
     /** Releases one document's script scope and host-wrapper identity cache. */
     default void releaseDocument(Document document) {
     }
@@ -47,6 +39,11 @@ public interface KuiScriptService {
     /** Adapts a script function to a one-argument callback in the owning engine scope. */
     default Consumer<Object> createCallback(Object callback) {
         return null;
+    }
+
+    /** Returns the stable identity used to match additions and removals of one callback. */
+    default Object callbackIdentity(Object callback) {
+        return callback;
     }
 
     /** Adapts a script function to a DOM listener in the owning engine scope. */

@@ -58,11 +58,6 @@ tasks.register('prepareCommonSources', Sync) {
         exclude 'io/github/kltyton/kltytonui/element/Translation.java'
         // 跨图 NativeImage#copyRect 是 1.19.3 才有的重载，本目标另附一份逐像素实现。
         exclude 'io/github/kltyton/kltytonui/render/ImageRegionCopy.java'
-        // Rhino 1802 在 Scriptable/SymbolScriptable 和 ScriptRuntime 中不使用现代版的 Context 参数。
-        exclude 'io/github/kltyton/kltytonui/script/ecmascript/EcmaProxyObject.java'
-        exclude 'io/github/kltyton/kltytonui/script/ecmascript/EcmaReflectGet.java'
-        exclude 'io/github/kltyton/kltytonui/script/host/RhinoHostObject.java'
-        exclude 'io/github/kltyton/kltytonui/script/StandaloneRhinoRuntime.java'
     }
     into "$buildDir/generated/common-main"
 }
@@ -202,18 +197,24 @@ legacyForge {
 mixin {
     add sourceSets.main, "${mod_id}.refmap.json"
     config "${mod_id}.mixins.json"
-    config "${mod_id}.rhino.mixins.json"
 }
 
 jar {
     manifest.attributes([
-            "MixinConfigs": "${mod_id}.mixins.json,${mod_id}.rhino.mixins.json",
+            "MixinConfigs": "${mod_id}.mixins.json",
             "Automatic-Module-Name": "kltytonui"
     ])
 }
 
 repositories {
     mavenCentral()
+    maven {
+        name = "MinecraftLibraries"
+        url = "https://libraries.minecraft.net/"
+        content {
+            includeModule "com.mojang", "logging"
+        }
+    }
     // Forge 1.18.2/1.19.2 are only published to the legacy maven.minecraftforge.net
     // mirror; maven.neoforged.net starts at 1.20. Filtering by group keeps this
     // repository from being consulted for anything else.
@@ -246,12 +247,9 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation ("maven.modrinth:rhino:N59eFKIq")
+    testRuntimeOnly 'com.ibm.icu:icu4j:70.1'
+    testRuntimeOnly 'com.mojang:logging:1.0.0'
 
-    // KubeJS/Rhino are compile-only integration targets (Rhino 1.18.2 build).
-    // They are not shipped at runtime so the dev client loads standalone.
-    modCompileOnly ("maven.modrinth:kubejs:MngQb49Q")
-    modCompileOnly ("maven.modrinth:rhino:N59eFKIq")
 
     // Minecraft only adopted JOML in 1.19.3; KUI's shared render code is built on
     // org.joml types, so 1.18.2 has to supply the library itself. implementation 覆盖
@@ -592,4 +590,5 @@ tasks.named('jacocoTestReport', JacocoReport).configure {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

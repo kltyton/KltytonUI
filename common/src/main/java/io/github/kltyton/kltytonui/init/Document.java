@@ -1,5 +1,6 @@
 package io.github.kltyton.kltytonui.init;
 
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.element.Body;
 import io.github.kltyton.kltytonui.element.Head;
@@ -12,11 +13,14 @@ import io.github.kltyton.kltytonui.render.RenderNode;
 import io.github.kltyton.kltytonui.render.Operation;
 import io.github.kltyton.kltytonui.parser.CSS;
 import io.github.kltyton.kltytonui.parser.HTML;
+import io.github.kltyton.kltytonui.parser.ResourceUsageIndex;
 import io.github.kltyton.kltytonui.resource.async.image.ImageAsyncHandler;
 import io.github.kltyton.kltytonui.resource.async.style.StyleAsyncHandler;
 import io.github.kltyton.kltytonui.resource.Font;
 import io.github.kltyton.kltytonui.viewport.KltytonViewport;
+import io.github.kltyton.kltytonui.ui.ZoomHudManager;
 import io.github.kltyton.kltytonui.layout.Box;
+import io.github.kltyton.kltytonui.layout.Layout;
 import io.github.kltyton.kltytonui.layout.Position;
 import io.github.kltyton.kltytonui.layout.Size;
 import net.minecraft.client.Minecraft;
@@ -32,6 +36,7 @@ import io.github.kltyton.kltytonui.style.Style;
 import io.github.kltyton.kltytonui.style.StyleFrameCache;
 import io.github.kltyton.kltytonui.style.StyleScope;
 import io.github.kltyton.kltytonui.render.Drawer;
+import io.github.kltyton.kltytonui.render.LayoutCommit;
 import io.github.kltyton.kltytonui.render.Operation;
 import io.github.kltyton.kltytonui.render.Rect;
 import io.github.kltyton.kltytonui.render.GeometryQueryScope;
@@ -53,7 +58,6 @@ import io.github.kltyton.kltytonui.dom.TextNode;
 import io.github.kltyton.kltytonui.dom.MutationObserverManager;
 import io.github.kltyton.kltytonui.style.Animation;
 import io.github.kltyton.kltytonui.style.Transition;
-import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
 
 public class Document implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
 
@@ -71,13 +75,14 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     }
 
     private static final String MOUSE_EVENTS_META_NAME = "kui-mouse-events";
+    private static final String HYPHEN_BREAK_META_NAME = "kui-hyphen-break";
     private static final long SLOW_REFRESH_LOG_THRESHOLD_NS = 50_000_000L;
     /** 连续点击视为序列的最大按下位移（浏览器双击的按下容差，拖拽后序列重置）。 */
     private static final double CLICK_PRESS_SLOP_PX = 4.0d;
     /** 文本拖拽候选视为真正拖拽的最小移动距离（与双击按下容差一致）。 */
     private static final double TEXT_DRAG_SLOP_PX = 4.0d;
     private final ElementTree tree = new ElementTree(this);
-    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
+
     private final RenderQueue render = new RenderQueue(this);
     private final String path;
     public final Map<String, Map<String, CSS.Declaration>> CSSCache = new LinkedHashMap<>();
@@ -90,6 +95,8 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     public final boolean inWorld;
     private volatile boolean reloadPersistent = false;
     private volatile boolean interceptMouseEvents;
+    /** 文档 meta {@code kui-hyphen-break}：false 时 '-' 不再作为换行机会。 */
+    private volatile boolean hyphenBreak = true;
     /** A document rendered by an owning surface instead of the global document pass. */
     private volatile boolean manuallyRendered = false;
     private volatile long refreshGeneration = 0L;
@@ -99,6 +106,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
      * 进行中的分片。放在 Document 实例上而不是静态表，文档销毁后随实例回收，不泄漏元素引用。
      */
     private volatile InitialCommitSlice initialCommitSlice;
+    private boolean deferInitialCommit;
     private volatile LifecycleState lifecycleState = LifecycleState.LOADING;
     private volatile String readyState = LifecycleState.LOADING.readyStateValue;
     private volatile Element lastClickTarget = null;
@@ -116,6 +124,14 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     private final KltytonViewport.State viewportState;
     private volatile KltytonViewport viewport = new KltytonViewport(1, 1, 1.0f, 1.0d);
     private final MutationObserverManager mutationManager = new MutationObserverManager(this);
+    /**
+     * 运行时插入的样式表元素 → 它在 {@link StyleAsyncHandler} 里占用 entry 的 order。
+     *
+     * <p>只登记样式表元素（{@code <link rel="stylesheet">} / {@code <style>}），元素离开文档树
+     * 或文档 refresh 时移除。主线程读写；async handler 的 apply 也发生在主线程，靠它判断
+     * 「这张表还归当初那个元素所有吗」。</p>
+     */
+    private final IdentityHashMap<Element, Integer> runtimeStylesheetOrders = new IdentityHashMap<>();
 
     private final StyleScope style = new StyleScope(this);
     private final MotionTrack motion = new MotionTrack(this);
@@ -162,6 +178,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         this.inWorld = inWorld;
         this.viewportState = KltytonViewport.spec(path).createState(path);
         this.interceptMouseEvents = parseMouseEventInterception(HTML.findMetaContent(path, MOUSE_EVENTS_META_NAME));
+        this.hyphenBreak = parseHyphenBreak(HTML.findMetaContent(path, HYPHEN_BREAK_META_NAME));
     }
 
     public boolean interceptsMouseEvents() {
@@ -172,11 +189,27 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         return interceptMouseEvents && hitTest(screenToDocumentPosition(screenPosition)) != null;
     }
 
+    /**
+     * 文档是否允许在 '-' / '‐' 之后换行。由 {@code kui-hyphen-break} meta 控制，
+     * 缺省为 true；编号、版本号等不希望被连字符拆开的文本可在页面上关闭。
+     */
+    public boolean allowsHyphenBreak() {
+        return hyphenBreak;
+    }
+
     private static boolean parseMouseEventInterception(String raw) {
         if (raw == null || raw.isBlank()) return false;
         return switch (raw.trim().toLowerCase(Locale.ROOT)) {
             case "intercept", "block", "true", "yes", "on", "1" -> true;
             default -> false;
+        };
+    }
+
+    private static boolean parseHyphenBreak(String raw) {
+        if (raw == null || raw.isBlank()) return true;
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "none", "off", "false", "no", "0", "disable", "disabled" -> false;
+            default -> true;
         };
     }
 
@@ -325,6 +358,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         boolean changed = zoomIn ? viewportState.zoomIn() : viewportState.zoomOut();
         if (!changed) return false;
         DocumentRegistry.applyViewportForPath(path, true);
+        ZoomHudManager.show(this);
         KltytonUI.LOGGER.debug(
                 "[KUI Viewport] zoom path={} zoom={} viewport={}x{}",
                 path,
@@ -339,6 +373,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         if (!viewportState.canUserScale()) return false;
         if (!viewportState.resetZoom()) return false;
         DocumentRegistry.applyViewportForPath(path, true);
+        ZoomHudManager.show(this);
         return true;
     }
 
@@ -359,16 +394,83 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     }
 
     /**
-     * 只重新加载样式：从模板重新提取 CSS 并异步重挂，不重建 DOM、不重跑脚本。
-     * 用于热重载中纯 CSS 变化的场景，页面状态完整保留。
+     * 只重新加载样式：从模板重新提取 CSS，仅重挂当前 DOM 中仍存在的模板 link，
+     * 不重建 DOM、不重跑脚本。用于热重载中纯 CSS 变化的场景，页面状态完整保留。
+     *
+     * <p>脚本运行时插进 DOM 的 {@code <link>}/{@code <style>} 也按浏览器语义留在原地：它们仍在
+     * 文档里就重新挂到新 handle 上继续生效，已经移除的则不占槽位。</p>
      */
     public void refreshStyles() {
         String rawHtml = HTML.getTemple(path);
         if (rawHtml == null) return;
         CSS.Extractor cssExtractor = new CSS.Extractor(path);
         cssExtractor.handle(rawHtml);
-        cssExtractor.pushToDocument(this);
+        List<CSS.StylesheetSource> sources = cssExtractor.orderedStylesheetSources();
+        if (documentElement != null) {
+            Map<String, Integer> connectedLinks = new HashMap<>();
+            ArrayDeque<Element> pending = new ArrayDeque<>();
+            pending.push(documentElement);
+            while (!pending.isEmpty()) {
+                Element element = pending.pop();
+                if ("LINK".equals(element.tagName) && isStylesheetRel(attributeIgnoreCase(element, "rel"))) {
+                    String href = attributeIgnoreCase(element, "href");
+                    if (href != null && !href.isBlank()) {
+                        String resolved = Loader.resolve(path, href);
+                        if (resolved != null) connectedLinks.merge(resolved, 1, Integer::sum);
+                    }
+                }
+                for (Element child : element.children) pending.push(child);
+            }
+            List<CSS.StylesheetSource> retained = new ArrayList<>();
+            for (CSS.StylesheetSource source : sources) {
+                if (source.external()) {
+                    String resolved = Loader.resolve(path, source.value());
+                    int count = connectedLinks.getOrDefault(resolved, 0);
+                    if (count == 0) continue;
+                    connectedLinks.put(resolved, count - 1);
+                }
+                retained.add(source);
+            }
+            sources = retained;
+        }
+        List<String> external = new ArrayList<>();
+        List<String> inline = new ArrayList<>();
+        for (CSS.StylesheetSource source : sources) {
+            (source.external() ? external : inline).add(source.value());
+        }
+        ResourceUsageIndex.recordCss(path, external);
+        StyleAsyncHandler.INSTANCE.attach(this, path, external, inline, sources);
+        // 新 handle 的 order 与旧 handle 无关：模板 link 重新登记到模板槽位，
+        // 运行时插入的表按文档顺序重新挂一遍（它们在新 handle 上必然排在模板表之后）。
+        runtimeStylesheetOrders.clear();
+        StyleAsyncHandler.INSTANCE.bindTemplateLinks(this, documentElement);
+        reattachRuntimeStylesheets();
         reapplyStylesFromCache();
+    }
+
+    /**
+     * 重新登记刷新前后都还在文档里的运行时样式表。
+     *
+     * <p>模板期 {@link CSS.Extractor} 会把 {@code <style>} 标签连同正文从标记里剥掉、只把
+     * {@code <link>} 留给 DOM，所以此刻树里的 {@code <style>} 必然是脚本插入的，
+     * {@code <link>} 里则有一部分刚被 {@link StyleAsyncHandler#bindTemplateLinks} 绑到模板槽位。
+     * 两者都由 {@link #attachRuntimeStylesheet} 按文档顺序处理：已登记的模板 link 会被跳过，
+     * 剩下的重新走运行时路径，于是移除元素时 {@link #detachRuntimeStylesheet} 仍能释放它。
+     * 这正是浏览器里「重新加载样式后，文档中现存的表继续生效」的那条路径。</p>
+     */
+    private void reattachRuntimeStylesheets() {
+        if (documentElement == null) return;
+        ArrayDeque<Element> pending = new ArrayDeque<>();
+        pending.push(documentElement);
+        while (!pending.isEmpty()) {
+            Element element = pending.pop();
+            if ("STYLE".equals(element.tagName) || "LINK".equals(element.tagName)) {
+                attachRuntimeStylesheet(element);
+            }
+            for (int i = element.children.size() - 1; i >= 0; i--) {
+                pending.push(element.children.get(i));
+            }
+        }
     }
 
     public void refresh() {
@@ -377,6 +479,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         io.github.kltyton.kltytonui.media.AudioEngine.releaseDocument(this);
         KltytonViewport.spec(path).createState(path);
         interceptMouseEvents = parseMouseEventInterception(HTML.findMetaContent(path, MOUSE_EVENTS_META_NAME));
+        hyphenBreak = parseHyphenBreak(HTML.findMetaContent(path, HYPHEN_BREAK_META_NAME));
         applyViewport(false);
         ContextScope contextScope = withContext(this);
         long resetEndNs = System.nanoTime();
@@ -413,13 +516,14 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
                 }
                 long initialStyleEndNs = System.nanoTime();
                 stage = "document expanders";
-                KuiServices.expander().apply(this);
+                boolean expansionChanged = KuiServices.expander().applyAndReportChanges(this);
                 long expandersEndNs = System.nanoTime();
 
-                // Final pass: apply styles once after expansion.
                 stage = "final style calculation";
-                clearRenderCaches(documentElement);
-                style.recomputeSubtree(documentElement);
+                if (expansionChanged) {
+                    clearRenderCaches(documentElement);
+                    style.recomputeSubtree(documentElement);
+                }
                 long finalStyleEndNs = System.nanoTime();
                 tree.getElements().forEach(Element::clearDirtyFlags);
                 render.reset();
@@ -524,12 +628,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         while (!stack.isEmpty()) {
             Element current = stack.pop();
             if (current == null) continue;
-            RenderElement renderer = current.getRenderer();
-            renderer.text.clear();
-            renderer.wrappedText.clear();
-            renderer.size.clear();
-            renderer.box.clear();
-            renderer.position.clear();
+            current.getRenderer().clearLocalLayoutCaches();
             List<Element> children = current.children;
             for (int i = children.size() - 1; i >= 0; i--) {
                 Element child = children.get(i);
@@ -542,15 +641,19 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
 
     private void beginRefreshLifecycle() {
         refreshGeneration++;
+        KuiServices.script().releaseDocument(this);
         Window.window.clearDocumentListeners(this);
         // 换代：旧元素实例全部失效，进行中的首次提交分片必须丢弃，按新一代重新开始。
         endInitialCommitSlice();
         lifecycleState = LifecycleState.LOADING;
         readyState = lifecycleState.readyStateValue;
         Window.window.clearIntersectionObservers(this);
+        Window.window.clearResizeObservers(this);
         clearMutationObservers();
         // refresh 会重建整棵 DOM，旧元素实例全部失效，选择单元缓存一并清空
         bumpSelectionCache();
+        // refresh 后 DOM 由模板重建，运行时插入的样式表元素已不在树上（其 order 也不再有效）
+        runtimeStylesheetOrders.clear();
     }
 
     private void enterInteractive() {
@@ -583,6 +686,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
             }
         }
         Window.window.clearIntersectionObservers(this);
+        Window.window.clearResizeObservers(this);
         clearMutationObservers();
         // 文档关闭：停止并释放本文档全部音频（含 new Audio() 游离实例）
         io.github.kltyton.kltytonui.media.AudioEngine.releaseDocument(this);
@@ -600,6 +704,7 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         clickCount = 0;
         pressX = 0.0d;
         pressY = 0.0d;
+        io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(this);
     }
 
     public void setPointerCapture(Element target, int pointerId) {
@@ -661,7 +766,10 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
             // DOM 变更(页面 JS replaceChildren 等)后布局可能尚未提交(布局提交在 20Hz tick),
             // paintList 仍引用被替换的旧节点 —— 点击会命中已移除节点,导致焦点/选区锚在
             // 旧节点上,输入后旧节点被移除触发 clearRemovedFocusState 失焦。命中前提交 pending 布局。
-            if (render.hasPendingWork()) {
+            if (needsInitialFullCommit()) {
+                if (render.hasPendingWork()) render.commit(false);
+                LayoutCommit.commitNow(this);
+            } else if (render.hasPendingWork()) {
                 render.commit();
             }
             return render.hitTest(documentPosition);
@@ -681,6 +789,12 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         if (element == null) return;
         if (element.document != this) return;
         style.requestRecalc(element);
+    }
+
+    @HideFromScript
+    public void requestInlineStyleRecalc(Element element, boolean hasPreviousStyle) {
+        if (element == null || element.document != this) return;
+        style.requestInlineRecalc(element, hasPreviousStyle);
     }
 
     public void requestPseudoStyleRecalc(Element element, String pseudoName) {
@@ -724,7 +838,11 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
                 // tick 内可能产生新的样式失效（例如脚本写属性），再 flush 一次以保证同 tick 内一致性。
                 commitStyleRecalc();
                 flushMutationObservers();
-                commitRenderState();
+                if (deferInitialCommit && needsInitialFullCommit() && LayoutCommit.isInitialCommitSlicingEnabled()) {
+                    render.commit(false);
+                } else {
+                    commitRenderState();
+                }
             } finally {
                 StyleFrameCache.end();
             }
@@ -947,6 +1065,95 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         markDirty(documentElement, Drawer.RELAYOUT | Drawer.REPAINT);
     }
 
+    // ------------------------------------------------------------------
+    // 运行时样式表：页面脚本插入/移除 <link rel="stylesheet"> / <style>
+    // ------------------------------------------------------------------
+
+    /**
+     * 元素进入文档树后的唯一通知点，由 {@link ElementTree} 的插入瓶颈点带上同一批元素调用。
+     *
+     * <p>模板 link 在解析结束时登记已有的样式表槽位；这里处理运行时插入的元素。</p>
+     */
+    public void onElementsAttached(List<Element> elements) {
+        if (elements == null || elements.isEmpty()) return;
+        for (int i = 0; i < elements.size(); i++) {
+            attachRuntimeStylesheet(elements.get(i));
+        }
+    }
+
+    /**
+     * 元素离开文档树后的唯一通知点，由 {@link ElementTree} 的移除瓶颈点调用。
+     *
+     * <p>元素树会把「移动」也实现成先 detach 再 attach，所以这里会被同一批元素带着空跑一次；
+     * 没登记过的元素直接忽略，真正的卸载只按 {@link #runtimeStylesheetOrders} 走。</p>
+     */
+    public void onElementsDetached(List<Element> elements) {
+        if (elements == null || elements.isEmpty()) return;
+        for (int i = 0; i < elements.size(); i++) {
+            detachRuntimeStylesheet(elements.get(i));
+        }
+    }
+
+    /**
+     * 这张运行时表是否仍归该元素所有（元素离开文档树时槽位已被释放）。
+     *
+     * <p>{@link StyleAsyncHandler} 的 apply 用它挡住「表比元素晚到」：元素已经被摘掉了，
+     * 就不能再把它的表装回文档。</p>
+     */
+    public boolean ownsRuntimeStylesheet(Element element, int order) {
+        if (element == null) return false;
+        Integer current = runtimeStylesheetOrders.get(element);
+        return current != null && current == order;
+    }
+
+    /** Associates a parsed template link with its already registered stylesheet slot. */
+    public void registerTemplateStylesheet(Element element, int order) {
+        if (element != null) runtimeStylesheetOrders.put(element, order);
+    }
+
+    private void attachRuntimeStylesheet(Element element) {
+        if (element == null || runtimeStylesheetOrders.containsKey(element)) return;
+        if ("LINK".equals(element.tagName)) {
+            if (!isStylesheetRel(attributeIgnoreCase(element, "rel"))) return;
+            String href = attributeIgnoreCase(element, "href");
+            if (href == null || href.isBlank()) return;
+            int order = StyleAsyncHandler.INSTANCE.attachExternalStylesheet(this, href, element);
+            if (order >= 0) runtimeStylesheetOrders.put(element, order);
+            return;
+        }
+        if ("STYLE".equals(element.tagName)) {
+            int order = StyleAsyncHandler.INSTANCE.attachInlineStylesheet(this, element.getTextContent());
+            if (order >= 0) runtimeStylesheetOrders.put(element, order);
+            // TODO: <style> 文本被脚本改写（textContent = ...）或用 CSSOM 增删规则时重新挂表；
+            //  当前只按插入那一刻的文本应用一次，改动文本不会生效。
+        }
+    }
+
+    private void detachRuntimeStylesheet(Element element) {
+        if (element == null) return;
+        Integer order = runtimeStylesheetOrders.remove(element);
+        if (order == null) return;
+        StyleAsyncHandler.INSTANCE.detachStylesheet(this, order);
+    }
+
+    /** HTML 属性名大小写不敏感（{@code setAttribute} 保留原样写入的写法）。 */
+    private static String attributeIgnoreCase(Element element, String name) {
+        String direct = element.getAttribute(name);
+        if (direct != null) return direct;
+        for (Map.Entry<String, String> entry : element.getAttributes().entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(name)) return entry.getValue();
+        }
+        return null;
+    }
+
+    private static boolean isStylesheetRel(String rel) {
+        if (rel == null || rel.isBlank()) return false;
+        for (String token : Layout.splitTopLevelWhitespace(rel.trim())) {
+            if ("stylesheet".equalsIgnoreCase(token)) return true;
+        }
+        return false;
+    }
+
     /**
      * Invalidates used text and intrinsic sizes after a web font becomes available.
      * Browsers reflow font-dependent layout when a FontFace finishes loading.
@@ -985,10 +1192,38 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
         return path;
     }
 
-    @Override
-    @dev.latvian.mods.rhino.util.HideFromJS
-    public final ScriptHostBindings getScriptBindings() {
-        return scriptBindings;
+    @HideFromScript
+    public List<Node> getScriptRoots() {
+        Set<Node> roots = Collections.newSetFromMap(new IdentityHashMap<>());
+        addScriptRoot(roots, focus.getFocusedElement());
+        addScriptRoot(roots, focus.getPressedElement());
+        addScriptRoot(roots, focus.getPreviousCursorElement());
+        for (Element element : pointerCaptureTargets.values()) addScriptRoot(roots, element);
+        addScriptRoot(roots, lastClickTarget);
+        documentSelection.collectScriptRoots(roots);
+        richTextSelection.collectScriptRoots(roots);
+        for (Element element : activeScrollElements) addScriptRoot(roots, element);
+
+        for (MutationObserver observer : mutationManager.snapshotObservers()) {
+            for (ObservedTarget target : observer.observed) {
+                if (target != null) addScriptRoot(roots, target.target());
+            }
+            synchronized (observer.pending) {
+                for (MutationRecord record : observer.pending) {
+                    if (record == null) continue;
+                    addScriptRoot(roots, record.target);
+                    for (Node node : record.addedNodes) addScriptRoot(roots, node);
+                    for (Node node : record.removedNodes) addScriptRoot(roots, node);
+                    addScriptRoot(roots, record.previousSibling);
+                    addScriptRoot(roots, record.nextSibling);
+                }
+            }
+        }
+        return List.copyOf(roots);
+    }
+
+    private static void addScriptRoot(Set<Node> roots, Node node) {
+        if (node != null) roots.add(node);
     }
 
     public boolean isReloadPersistent() {
@@ -1264,6 +1499,12 @@ public class Document implements io.github.kltyton.kltytonui.script.host.KuiScri
     // 这俩是创建UI用的，如果refresh放在构造函数里，那创建时就不会执行内嵌js，所以挪到了这里。
     public static Document create(String path) {
         return DocumentRegistry.create(path);
+    }
+
+    public static Document createForScreen(String path) {
+        Document document = DocumentRegistry.create(path);
+        if (document != null) document.deferInitialCommit = true;
+        return document;
     }
 
     public static Document createInWorld(String path) {

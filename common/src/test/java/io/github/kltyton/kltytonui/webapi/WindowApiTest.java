@@ -8,10 +8,8 @@ import io.github.kltyton.kltytonui.util.LocalStorage;
 import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.resource.Image;
-import io.github.kltyton.kltytonui.loader.Loader;
+import io.github.kltyton.kltytonui.script.neon.NeonPageRuntime;
 import io.github.kltyton.kltytonui.task.ClientScheduler;
-import dev.latvian.mods.rhino.Context;
-import dev.latvian.mods.rhino.ScriptableObject;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
@@ -258,26 +256,14 @@ class WindowApiTest {
     }
 
     @Test
-    void consoleDebugIsWritableAndCallableThroughRhinoBootstrap() {
-        Document document = TestDocumentFactory.createDocument();
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = context.initStandardObjects();
-        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document));
-        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window));
-
-        String bootstrap = Loader.readGlobalJS()
-                .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
-                        "let document = __auiTestDocument;")
-                .replace("let window = KltytonUI.getWindow();", "let window = __auiTestWindow;");
-        Object result = context.evaluateString(scope, bootstrap
-                        + "\nvar __auiConsoleDebugBefore = typeof console.debug + '|' + (console.debug === console.log);"
-                        + "\nconsole.debug = function(value) { return 'debug:' + value; };"
-                        + "\n__auiConsoleDebugBefore + '|' + typeof console.debug + '|' + console.debug('ok');",
-                "global.js-console-debug", 1, null);
-
-        assertEquals("function|true|function|debug:ok", result);
+    void consoleDebugIsWritableAndCallableThroughNeonBootstrap() {
+        TestDocumentFactory.withNeonDocument(document -> {
+            NeonPageRuntime.eval("var before = typeof console.debug + '|' + (console.debug === console.log);"
+                    + "console.debug = function(value) { return 'debug:' + value; };"
+                    + "document.body.setAttribute('data-result', before + '|' + typeof console.debug + '|' + console.debug('ok'));",
+                    null, "global.js-console-debug");
+            assertEquals("function|true|function|debug:ok", document.body.getAttribute("data-result"));
+        });
     }
 
     @Test

@@ -15,6 +15,7 @@ public class Color {
     private static final int PARSE_CACHE_LIMIT = 4096;
     private static final ConcurrentHashMap<String, Integer> PARSE_CACHE = new ConcurrentHashMap<>();
     public static final Color BLACK = new Color("#000");
+    public static final int DEFAULT_CURRENT_COLOR = 0xFF000000;
     private static final Map<String, Integer> NAMED_COLORS = Map.ofEntries(
             Map.entry("black", 0xFF000000),
             Map.entry("white", 0xFFFFFFFF),
@@ -73,6 +74,19 @@ public class Color {
             PARSE_CACHE.putIfAbsent(string, result);
         }
         return result;
+    }
+
+    public static boolean isCurrentColor(String value) {
+        return value != null && "currentcolor".equalsIgnoreCase(value.trim());
+    }
+
+    public static int parse(String string, int currentColor) {
+        return isCurrentColor(string) ? currentColor : parse(string);
+    }
+
+    public static int resolveCurrentColor(String color, int fallback) {
+        if (color == null || color.isBlank() || "unset".equalsIgnoreCase(color.trim())) return fallback;
+        return parse(color.trim(), fallback);
     }
 
     private static int parseUncached(String string) {

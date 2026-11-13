@@ -1,6 +1,9 @@
 package io.github.kltyton.kltytonui.client.gui.pip;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.TextureFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.kltyton.kltytonui.dev.resource.ResourcePreviewDialog;
 import io.github.kltyton.kltytonui.init.Document;
@@ -24,12 +27,17 @@ import org.jspecify.annotations.NonNull;
  * everything half a texture off-centre. Instead this renderer installs the
  * same state KUI used on 1.21.1's main target: an orthographic projection in
  * GUI units, an identity model-view, and a fresh identity {@link PoseStack}.
- * The fullscreen PIP texture is exactly the window's physical size, so the
- * device-pixel scissor rectangles computed by {@link Mask} line up with the
- * window coordinate system.</p>
+ * Scissor conversion uses the live PIP attachment size, including the rounding
+ * from GUI units to physical pixels.</p>
  */
 public final class KltytonUiPipRenderer extends PictureInPictureRenderer<KltytonUiPipRenderState> {
     private static final float MIN_PIP_DEPTH_RANGE = 1024.0F;
+    private static final double DEPTH_CLEAR_VALUE = 1.0;
+
+    private GpuTexture ownedDepthTexture;
+    private GpuTextureView ownedDepthTextureView;
+    private int ownedDepthWidth;
+    private int ownedDepthHeight;
 
     public KltytonUiPipRenderer(MultiBufferSource.BufferSource bufferSource) {
         super(bufferSource);
@@ -40,13 +48,10 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
         return KltytonUiPipRenderState.class;
     }
 
-    // NeoForge's port swaps the PIP depth attachment for a DEPTH32_STENCIL8 one
-    // so Mask's stencil clips work inside the overlay. Vanilla 26.1 has no
-    // stencil-capable texture format, so that is impossible here and Mask takes
-    // its scissor-only path instead (see fabric.RenderService#supportsStencil).
-
     @Override
     protected void renderToTexture(KltytonUiPipRenderState renderState, @NonNull PoseStack poseStack) {
+        GpuTextureView previousDepthOverride = RenderSystem.outputDepthTextureOverride;
+        boolean completedNormally = false;
         var modelView = RenderSystem.getModelViewStack();
         modelView.pushMatrix();
         try {
@@ -62,6 +67,10 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
 
             PoseStack guiPose = new PoseStack();
             if (renderState.mode() == KltytonUiPipRenderState.Mode.UI) {
+                // Vanilla's PIP depth attachment is DEPTH32 without COPY_SRC, so
+                // clip layers cannot copy it. Own a matching copyable attachment
+                // and expose it through the live depth override for this frame.
+                installOwnedDepth();
                 Mask.resetDepth();
                 Base.FlatLayerPlan flatLayers = Base.planFlatLayers();
                 for (Document document : flatLayers.orderedDocuments()) {
@@ -102,8 +111,72 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
             // Font text queued by the documents lives in the shared buffer
             // source; flush it while the PIP override is still active.
             Minecraft.getInstance().renderBuffers().bufferSource().endBatch();
+            completedNormally = true;
         } finally {
-            modelView.popMatrix();
+            try {
+                modelView.popMatrix();
+            } catch (RuntimeException | Error failure) {
+                RenderSystem.outputDepthTextureOverride = previousDepthOverride;
+                throw failure;
+            } finally {
+                if (!completedNormally) {
+                    // The base PIP renderer clears both overrides itself on normal
+                    // return, so only an exceptional exit needs an explicit restore.
+                    RenderSystem.outputDepthTextureOverride = previousDepthOverride;
+                }
+            }
+        }
+    }
+
+    private void installOwnedDepth() {
+        GpuTextureView colorOverride = RenderSystem.outputColorTextureOverride;
+        if (colorOverride == null) throw new IllegalStateException("KUI PIP color attachment is missing");
+        int width = colorOverride.texture().getWidth(0);
+        int height = colorOverride.texture().getHeight(0);
+        if (ownedDepthTexture == null || ownedDepthWidth != width || ownedDepthHeight != height) {
+            destroyOwnedDepth();
+            int usage = GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST
+                    | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
+            GpuTexture texture = RenderSystem.getDevice().createTexture(
+                    () -> "kltytonui_pip_depth", usage, TextureFormat.DEPTH32,
+                    width, height, 1, 1);
+            GpuTextureView view;
+            try {
+                view = RenderSystem.getDevice().createTextureView(texture);
+            } catch (RuntimeException | Error failure) {
+                texture.close();
+                throw failure;
+            }
+            ownedDepthTexture = texture;
+            ownedDepthTextureView = view;
+            ownedDepthWidth = width;
+            ownedDepthHeight = height;
+        }
+        RenderSystem.getDevice().createCommandEncoder()
+                .clearDepthTexture(ownedDepthTexture, DEPTH_CLEAR_VALUE);
+        RenderSystem.outputDepthTextureOverride = ownedDepthTextureView;
+    }
+
+    private void destroyOwnedDepth() {
+        GpuTextureView view = ownedDepthTextureView;
+        GpuTexture texture = ownedDepthTexture;
+        ownedDepthTextureView = null;
+        ownedDepthTexture = null;
+        ownedDepthWidth = 0;
+        ownedDepthHeight = 0;
+        try {
+            if (view != null) view.close();
+        } finally {
+            if (texture != null) texture.close();
+        }
+    }
+
+    @Override
+    public void close() {
+        try {
+            destroyOwnedDepth();
+        } finally {
+            super.close();
         }
     }
 

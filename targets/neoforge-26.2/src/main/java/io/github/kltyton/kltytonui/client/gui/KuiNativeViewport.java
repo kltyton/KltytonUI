@@ -4,6 +4,7 @@ import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.kltyton.kltytonui.KltytonUI;
 import net.neoforged.api.distmarker.Dist;
@@ -11,8 +12,12 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
+import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.gui.render.pip.PictureInPictureRenderer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.state.gui.BlitRenderState;
+import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import net.minecraft.client.renderer.state.gui.pip.PictureInPictureRenderState;
 import net.neoforged.neoforge.client.event.RegisterPictureInPictureRenderersEvent;
 import org.jspecify.annotations.Nullable;
@@ -60,8 +65,18 @@ public final class KuiNativeViewport {
                 populated = false;
             }
             if (state.draw().render(target, state.x1() - state.x0(), state.y1() - state.y0())) populated = true;
-            if (populated) RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(
-                    target.getColorTexture(), output.texture(), 0, 0, 0, 0, 0, width, height);
+        }
+        @Override protected void blitTexture(State state, GuiRenderState guiRenderState) {
+            if (!populated) {
+                super.blitTexture(state, guiRenderState);
+                return;
+            }
+            guiRenderState.addBlitToCurrentLayer(new BlitRenderState(
+                    RenderPipelines.GUI_TEXTURED_PREMULTIPLIED_ALPHA,
+                    TextureSetup.singleTexture(target.getColorTextureView(),
+                            RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST)),
+                    state.pose(), state.x0(), state.y0(), state.x1(), state.y1(),
+                    0.0F, 1.0F, 1.0F, 0.0F, -1, state.scissorArea(), null));
         }
         @Override public void close() {
             if (target != null) target.destroyBuffers();

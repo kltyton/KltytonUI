@@ -14,3 +14,6 @@ plugins {
 }
 
 rootProject.name = 'kltytonui-common'
+
+// Target builds include common as a composite; nested builds are flattened into that composite.
+includeBuild('../runtime/neonjs')

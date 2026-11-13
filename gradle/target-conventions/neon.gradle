@@ -1,0 +1,25 @@
+def neonRuntime = 'dev.mooner.neonjs:neonjs-runtime:0.1.4'
+
+def versionedDependency = { String coordinate, String versionRange, String preferredVersion ->
+    def dependency = dependencies.create(coordinate)
+    dependency.version {
+        strictly(versionRange)
+        prefer(preferredVersion)
+    }
+    dependency
+}
+
+def fabricTarget = plugins.hasPlugin('fabric-loom') || plugins.hasPlugin('net.fabricmc.fabric-loom')
+def embeddedConfiguration = fabricTarget ? 'include' : 'jarJar'
+
+[
+        [coordinate: neonRuntime, version: '0.1.4', range: '[0.1.4,0.1.5)']
+].each { item ->
+    def dependency = versionedDependency(item.coordinate, item.range, item.version)
+    dependencies.add('implementation', dependency)
+    dependencies.add(embeddedConfiguration, versionedDependency(item.coordinate, item.range, item.version))
+
+    if (!fabricTarget && java.toolchain.languageVersion.get().asInt() <= 21) {
+        dependencies.add('additionalRuntimeClasspath', versionedDependency(item.coordinate, item.range, item.version))
+    }
+}

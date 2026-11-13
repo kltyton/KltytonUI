@@ -1,6 +1,5 @@
 package io.github.kltyton.kltytonui.container.filter;
 
-import io.github.kltyton.kltytonui.registry.annotation.KJSBindings;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
@@ -14,7 +13,6 @@ import java.util.function.Predicate;
  * ItemStack 放入过滤器。
  */
 @FunctionalInterface
-@KJSBindings(value = "FilterUtil")
 public interface FilterUtil extends ItemFilter<ItemStack>, io.github.kltyton.kltytonui.spi.KuiBindingFilter {
     FilterUtil ANY = stack -> true;
     FilterUtil NONE = stack -> false;

@@ -1,5 +1,81 @@
 # Changelog
 
+## 1.3.1 - 2026-11-13
+
+### Changed
+
+- Run all KUI page scripts with the embedded Java implementation of NeonJS.
+
+### Fixed
+
+- Refresh root CSS variables and descendant styles when reapplying a stylesheet.
+- Apply the default alignment to automatic cross-axis sizing in flex layouts.
+- Use the native table layout in the McUI theme.
+- Preserve string conversion for dataset values and writable console.debug in page scripts.
+
+### Removed
+
+- Remove the Rhino fallback and the KubeJS integration across all supported targets.
+
+## 1.3.0.1 - 2026-11-04
+
+### Added
+
+- Add interactive player and entity model previews with per-element rotation and lifecycle ownership.
+- Render background gradients through the loader's shader backend.
+- Allow container screens to retain their concrete menu type.
+
+### Changed
+
+- Reuse DOM indexes, natural text measurements, inherited styles and committed layout geometry.
+- Cache reusable document paint output while invalidating changes from layout, animation and resources.
+- Batch eligible HTML insertions while preserving loader-specific slot validation and lifecycle callbacks.
+- Coalesce WebView pointer and frame work while preserving the navigation-scoped JSON bridge.
+- Keep the pure Java NeonJS runtime and Minecraft-provided ICU4J.
+
+### Fixed
+
+- Preserve null prototypes in JavaScript object creation and prototype setters.
+- Maintain nested clip state across offscreen filter targets and draw custom cursors after page content.
+
+## 1.2.9 - 2026-10-26
+
+### Added
+
+- Add Create and Terminal themes and update the Modrinth light and dark themes.
+- Add Grid areas, named lines, implicit tracks, dense placement and subgrid, plus shared table columns and row/column spans.
+- Add an opt-in WebView JSON bridge with exact-page authorization and navigation-scoped responses.
+- Show the current page zoom with a reset control after viewport zoom changes.
+
+### Changed
+
+- Add the NeonJS 0.1.4 JVM page runtime. Bundle its core, Intl and relocated ASM, use Minecraft's ICU4J, and package Kotlin standard library as a separate loader library.
+- Keep project documentation and BlueMap files out of runtime archives.
+- Omit development test pages and runners from release archives.
+
+### Fixed
+
+- Reuse an active screen Document when Minecraft calls `init()` again during a window resize. This preserves the page's form values, scroll position, and script state; container screens also reuse their slot binder and resynchronize slot positions. Closing the screen still unloads and removes the Document.
+- Invoke Java collection methods through public interfaces while preserving backing-object identity, read-only behavior and live views.
+- Preserve paste, cut and drop input types, SVG CSS paint precedence and current-color invalidation.
+- Resolve transition longhands and variable-dependent layout shorthands through the CSS cascade.
+- Preserve greater-than characters inside quoted HTML attributes and literal less-than characters in text.
+- Reuse Canvas drawing state and batch additive compositing work.
+
+## 1.2.8 - 2026-10-20
+
+### Added
+
+- Added fourteen optional CSS themes, a shared theme preview, and the `<theme-switcher>` control. Existing Ore, AE, and McUI resource paths remain available.
+- Added `kui-preload` for opt-in template preparation and `kui-hyphen-break` for controlling line breaks after hyphens.
+
+### Fixed
+
+- Preserve runtime stylesheet ownership when links or style elements are inserted, removed, moved, or refreshed; ignore literal HTML tags inside comments and raw script/style text.
+- Correct incremental pointer hit ordering, wrapped flex text, inline sizing, gradient clipping, patterned borders, masks, and native-font draw boundaries.
+- Cache DevTools tree rows by the visible viewport and avoid redundant layout invalidation and derived-font lookups.
+- Use static MSVC runtime linkage for the Windows WebView host.
+
 ## 1.2.7 - 2026-10-05
 
 ### Added

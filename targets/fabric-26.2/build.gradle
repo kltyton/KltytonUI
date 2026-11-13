@@ -62,16 +62,12 @@ tasks.named('compileJava').configure { dependsOn 'prepareCommonSources' }
 repositories {
     mavenCentral()
     maven { url = 'https://www.cursemaven.com' }
-    maven { url = 'https://maven.latvian.dev/releases' }
 }
 
 dependencies {
     minecraft "com.mojang:minecraft:${fabric_minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
-
-    // common exposes Rhino callback types even when KubeJS is absent.
-    implementation "dev.latvian.mods:rhino:${rhino_fabric_version}"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -83,6 +79,12 @@ dependencies {
 
 tasks.named('processResources', ProcessResources).configure {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // This runtime uses named Mixin targets rather than a legacy refmap.
+    def excludedMixinRefmap = '"refmap":'
+    inputs.property('excludedMixinRefmap', excludedMixinRefmap)
+    filesMatching('kltytonui.mixins.json') {
+        filter { line -> line.contains(excludedMixinRefmap) ? null : line }
+    }
     // 26.2 的资源包格式与共享树里的 1.20 pack_format 不兼容，改用本 target 的
     // pack.mcmeta（min_format 88 / max_format 107）。
     eachFile { details ->
@@ -91,9 +93,6 @@ tasks.named('processResources', ProcessResources).configure {
             details.exclude()
         }
     }
-    // Page scripts use standalone Rhino. The shared NeoForge KubeJS plugin
-    // entry is not part of the Fabric target.
-    exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: fabric_minecraft_version,
             fabric_loader_version: fabric_loader_version,
@@ -144,4 +143,5 @@ tasks.matching { it.name == 'runClient' }.configureEach {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

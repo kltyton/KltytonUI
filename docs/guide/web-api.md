@@ -1,8 +1,8 @@
 # KltytonUI Web API
 
-KUI 不是 Chromium，也没有浏览器内核。在支持的 target 上，页面 JavaScript 由 Rhino 执行，Java 侧的 Document、Element、事件和资源管线被桥接成浏览器风格的对象。所以这里的 API 分三类：
+KUI 不是 Chromium，也没有浏览器内核。在支持页面脚本的 target 上，页面 JavaScript 由内嵌 NeonJS 0.1.4 JVM 运行时执行，每个页面文档使用独立的 JavaScript Realm；浏览器风格的 Document、Element、事件和资源 API 由 Java 提供。页面脚本支持现代 JavaScript 语法，但这不意味着 KUI 提供完整浏览器或 DOM 内核。所以这里的 API 分三类：
 
-> **运行时依赖**：九个目标均接入独立 Rhino 页面运行时，页面脚本不要求 KubeJS。安装与 Loader / Minecraft 版本匹配的 Rhino 依赖；各目标与可选 KubeJS 绑定见[总览](overview#loader-与脚本支持)。
+> KUI 内嵌 NeonJS 页面运行时。JIT 面向 Java 17，Intl 使用 Minecraft 自带的 ICU4J。
 
 - **可用**：按下文示例直接用；
 - **轻量兼容**：名字和常用调法和浏览器一样，但返回值、时机或参数范围有缩减；
@@ -29,7 +29,7 @@ CSS 属性和布局见 [HTML/CSS 覆盖面](html-css-coverage)，页面级的 vi
 </script>
 ```
 
-页面脚本建议用 `var`、普通 `function` 和传统循环。KUI 会对部分现代写法做兼容转换，但 Rhino 不是现代 JS 引擎，别赌。
+页面脚本由 NeonJS 执行，可使用现代 JavaScript 语法。KUI 提供的浏览器 API 仍以本文列出的 Java 实现子集为准。
 
 ## 全局对象
 
@@ -55,7 +55,7 @@ CSS 属性和布局见 [HTML/CSS 覆盖面](html-css-coverage)，页面级的 vi
 ```javascript
 window.innerWidth          // Document 逻辑视口尺寸
 window.innerHeight
-window.devicePixelRatio    // Minecraft GUI scale
+window.devicePixelRatio    // 物理像素 / 文档 CSS 像素（设备缩放）
 ```
 
 事件里的 `clientX/clientY` 已经是逻辑坐标，不要再乘 devicePixelRatio 或 renderScale。
@@ -405,7 +405,7 @@ document.addEventListener("DOMContentLoaded", installPage);
 
 **script 双内容**：带 `src` 又写了内联代码的 `<script>`，两个都会执行（带警告）。别依赖浏览器"有 src 就忽略内联"的行为。
 
-**日志前缀**：排查问题搜 `[KUI HTML]` / `[KUI CSS]` / `[KUI JS]` / `[KUI Fetch]` / `[KUI Canvas]` / `[KUI Event]`，一般带资源路径。独立页面的 `console.log/debug/warn/error` 和 `console.time/timeEnd` 写入 KUI 日志；共享 KubeJS 脚本保留已有的 `console`。
+**日志前缀**：排查问题搜 `[KUI HTML]` / `[KUI CSS]` / `[KUI JS]` / `[KUI Fetch]` / `[KUI Canvas]` / `[KUI Event]`，一般带资源路径。独立页面的 `console.log/debug/warn/error` 和 `console.time/timeEnd` 写入 KUI 日志。
 
 **Top layer**：宿主侧 `setTopLayer(true)` 让弹窗、下拉菜单在当前 Document 内最后绘制、不被祖先 overflow 裁剪。只影响本 Document 内顺序，不会把一个 Document 抬到另一个之上。
 

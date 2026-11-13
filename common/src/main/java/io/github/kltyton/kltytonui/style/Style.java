@@ -4,6 +4,8 @@ import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.style.Interaction;
 
 import java.lang.reflect.Field;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Modifier;
 import java.util.AbstractMap;
 import java.util.HashMap;
@@ -56,12 +58,20 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
 
     public String gridTemplateColumns = "unset";
     public String gridTemplateRows = "unset";
+    public String gridTemplateAreas = "none";
+    public String gridAutoRows = "auto";
+    public String gridAutoColumns = "auto";
+    public String gridAutoFlow = "row";
+    public String gridRowStart = "auto";
+    public String gridRowEnd = "auto";
+    public String gridColumnStart = "auto";
+    public String gridColumnEnd = "auto";
 
     public String gap = "0px";
     public String rowGap = "unset";
     public String columnGap = "unset";
 
-    public String justifyItems = "stretch";
+    public String justifyItems = "normal";
 
     public String justifySelf = "unset";
     public String alignSelf = "unset";
@@ -114,6 +124,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     public String strokeLinecap = "unset";
     public String strokeLinejoin = "unset";
     public String fillOpacity = "unset";
+    public String fillRule = "unset";
     public String strokeOpacity = "unset";
     public String shapeRendering = "unset";
     public String imageRendering = "unset";
@@ -143,8 +154,8 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     public String flexDirection = "row";
     public String flexWrap = "nowrap";
     public String alignContent = "stretch";
-    public String justifyContent = "flex-start";
-    public String alignItems = "stretch";
+    public String justifyContent = "normal";
+    public String alignItems = "normal";
     public String flex = "unset";
     public String flexGrow = "0";
     public String flexShrink = "1";
@@ -169,6 +180,9 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     public String pointerEvents = "auto";
     public String visibility = "unset";
     public String transition = "none";
+    public String transitionProperty = "all";
+    public String transitionDuration = "0s";
+    public String transitionDelay = "0s";
     public String transitionTimingFunction = "ease";
     public String transform = "none";
     public String transformOrigin = "50% 50%";
@@ -205,6 +219,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     public String animationTimingFunction = "unset";
     public String animationPlayState = "unset";
     private Map<String, String> customProperties = new HashMap<>();
+    transient Map<String, CSS.Declaration> pendingShorthands;
     private transient Element inlineOwner;
 
     // 计算样式阶段一次性编译出来的类型化长度/盒模型。惰性编译，首访时解析当前字符串字段；
@@ -231,6 +246,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     private static final Map<String, String> STYLE_NAME = new HashMap<>();
     static final Field[] STYLE_FIELDS;
     static final String[] STYLE_FIELD_CSS_NAMES;
+    private static final VarHandle[] STYLE_FIELD_ACCESSORS;
     private static final Set<String> TEXT_PROPS = Set.of(
             "color", "font-size", "font-family", "font-weight", "font-style", "text-stroke", "text-decoration", "line-height",
             "direction", "letter-spacing", "text-align", "vertical-align", "text-indent", "text-transform", "white-space", "word-break", "overflow-wrap", "text-overflow",
@@ -264,6 +280,15 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         }
         STYLE_FIELDS = fields.toArray(new Field[0]);
         STYLE_FIELD_CSS_NAMES = cssNames.toArray(new String[0]);
+        STYLE_FIELD_ACCESSORS = new VarHandle[STYLE_FIELDS.length];
+        try {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            for (int i = 0; i < STYLE_FIELDS.length; i++) {
+                STYLE_FIELD_ACCESSORS[i] = lookup.unreflectVarHandle(STYLE_FIELDS[i]);
+            }
+        } catch (IllegalAccessException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
     }
 
     /** Forces one-time reflection metadata initialization outside document creation. */
@@ -283,15 +308,25 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
 
     public static Style createInlineDeclarationStyle(Element owner) {
         Style style = new Style();
-        for (Field field : STYLE_FIELDS) {
-            try {
-                field.set(style, "");
-            } catch (IllegalAccessException ignored) {
-            }
-        }
-        style.customProperties.clear();
+        style.resetInlineDeclaration();
         style.inlineOwner = owner;
         return style;
+    }
+
+    /** Clears a reusable inline declaration without changing its owner. */
+    public void resetInlineDeclaration() {
+        for (VarHandle field : STYLE_FIELD_ACCESSORS) field.set(this, "");
+        customProperties.clear();
+        pendingShorthands = null;
+        resetMetrics();
+    }
+
+    static String readField(Style style, int index) {
+        return (String) STYLE_FIELD_ACCESSORS[index].get(style);
+    }
+
+    static void writeField(Style style, int index, String value) {
+        STYLE_FIELD_ACCESSORS[index].set(style, value);
     }
 
     public String getPropertyValue(String name) {
@@ -435,8 +470,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
 
     public void merge(String styleString) {
         if (styleString == null || styleString.isBlank()) return;
-        InlineStyleDeclaration.parse(styleString).forEach((property, value) ->
-                update(property, InlineStyleDeclaration.valueWithoutPriority(value)));
+        mergeCascade(null, styleString);
     }
 
     /**
@@ -445,10 +479,12 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
      * 内联普通高于样式表普通但被样式表 !important 覆盖；内联 !important 优先级最高。
      */
     public void mergeCascade(Map<String, CSS.Declaration> stylesheet, String inlineStyle) {
+        Map<String, String> declarations = inlineStyle == null || inlineStyle.isBlank()
+                ? null : InlineStyleDeclaration.parse(inlineStyle);
         applyStylesheet(stylesheet, false);
-        applyInline(inlineStyle, false);
+        applyInline(declarations, false);
         applyStylesheet(stylesheet, true);
-        applyInline(inlineStyle, true);
+        applyInline(declarations, true);
     }
 
     /**
@@ -462,7 +498,8 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
      */
     private static final Set<String> SHORTHAND_PROPERTIES = Set.of(
             "background", "font", "mask", "flex", "gap", "inset", "margin", "padding", "border",
-            "border-width", "border-color", "animation", "rotate", "overflow", "visibility", "outline",
+            "border-width", "border-color", "animation", "transition", "rotate", "overflow", "visibility", "outline",
+            "grid", "grid-template", "grid-row", "grid-column", "grid-area", "place-items", "place-self", "place-content",
             "inset-inline", "inset-block", "inset-inline-start", "inset-inline-end",
             "inset-block-start", "inset-block-end", "padding-inline", "padding-block",
             "padding-inline-start", "padding-inline-end", "padding-block-start", "padding-block-end",
@@ -484,14 +521,19 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
             CSS.Declaration declaration = entry.getValue();
             if (declaration != null && declaration.important() == important
                     && !SHORTHAND_PROPERTIES.contains(entry.getKey())) {
-                update(entry.getKey(), declaration.value());
+                if (declaration.pendingShorthand() != null) {
+                    if (pendingShorthands == null) pendingShorthands = new HashMap<>();
+                    pendingShorthands.put(entry.getKey(), declaration);
+                } else {
+                    update(entry.getKey(), declaration.value());
+                }
             }
         }
     }
 
-    private void applyInline(String inlineStyle, boolean important) {
-        if (inlineStyle == null || inlineStyle.isBlank()) return;
-        for (Map.Entry<String, String> entry : InlineStyleDeclaration.parse(inlineStyle).entrySet()) {
+    private void applyInline(Map<String, String> declarations, boolean important) {
+        if (declarations == null || declarations.isEmpty()) return;
+        for (Map.Entry<String, String> entry : declarations.entrySet()) {
             String value = entry.getValue();
             if (value == null || value.isBlank()) continue;
             if (("important".equals(InlineStyleDeclaration.priorityOf(value))) == important) {
@@ -514,6 +556,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         if ("-webkit-text-stroke".equalsIgnoreCase(name)) name = "text-stroke";
         if ("text-decoration-line".equalsIgnoreCase(name)) name = "text-decoration";
         if (name.toLowerCase(Locale.ROOT).startsWith("-webkit-mask-")) name = name.substring(8);
+        String cssName = InlineStyleDeclaration.normalizeProperty(name);
+        if (!ShorthandParser.isValidGridDeclaration(cssName, value)) return;
+        if (!ShorthandParser.isValidFlexDeclaration(cssName, value)) return;
+        if (pendingShorthands != null) pendingShorthands.remove(cssName);
         Map<String, String> logicalBox = ShorthandParser.expandLogicalBox(name, value);
         if (!logicalBox.isEmpty()) {
             logicalBox.forEach(this::update);
@@ -530,6 +576,11 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         }
         if ("mask".equals(styleName)) {
             ShorthandParser.applyMask(this, value);
+            return;
+        }
+        if (Set.of("grid", "gridTemplate", "gridRow", "gridColumn", "gridArea",
+                "placeItems", "placeSelf", "placeContent").contains(styleName)) {
+            ShorthandParser.applyGrid(this, cssName, value);
             return;
         }
         if ("flex".equals(styleName)) {
@@ -574,6 +625,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         }
         if (styleName.startsWith("border") && styleName.endsWith("Color")) {
             ShorthandParser.applyBorderSidePart(this, styleName, value, false);
+            return;
+        }
+        if ("transition".equals(styleName)) {
+            ShorthandParser.applyTransition(this, value);
             return;
         }
         if ("animation".equals(styleName)) {
@@ -626,6 +681,13 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
 
     public void applyUserAgentDefaults(Element element) {
         display = defaultDisplayFor(element);
+        if (element != null && ("TD".equalsIgnoreCase(element.tagName) || "TH".equalsIgnoreCase(element.tagName))) {
+            verticalAlign = "top";
+            String align = element.getAttribute("align");
+            if (align != null && Set.of("left", "center", "right").contains(align.toLowerCase(Locale.ROOT))) {
+                textAlign = align.toLowerCase(Locale.ROOT);
+            }
+        }
         if (isFormControl(element)) {
             fontSize = FORM_CONTROL_DEFAULT_FONT_SIZE;
             lineHeight = "normal";
@@ -713,6 +775,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         return customProperties.get(VarResolver.normalizeCustomPropertyName(name));
     }
 
+    public boolean hasSameCustomProperties(Style other) {
+        return other != null && customProperties.equals(other.customProperties);
+    }
+
     public boolean affectsDescendantComputedStyleComparedTo(Style previous) {
         if (previous == null) return true;
         if (!customProperties.equals(previous.customProperties)) return true;
@@ -732,6 +798,13 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
      */
     public void resolveVarReferences(Element context) {
         VarResolver.resolveReferences(this, context);
+    }
+
+    void deferShorthand(String property, String value, Set<String> longhands) {
+        setFieldValue(transformStyleName(property), value.trim());
+        if (pendingShorthands == null) pendingShorthands = new HashMap<>();
+        CSS.Declaration pending = new CSS.Declaration(value.trim(), false, property);
+        longhands.forEach(name -> pendingShorthands.put(name, pending));
     }
 
     public void finalizeComputedValues(Element context) {
@@ -1077,14 +1150,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     /** Copies the mutable CSS fields without allocating another Style object. */
     public void copyFrom(Style other) {
         if (other == null || other == this) return;
-        for (Field field : STYLE_FIELDS) {
-            try {
-                field.set(this, field.get(other));
-            } catch (IllegalAccessException ignored) {
-            }
-        }
+        for (VarHandle field : STYLE_FIELD_ACCESSORS) field.set(this, field.get(other));
         customProperties.clear();
         customProperties.putAll(other.customProperties);
+        pendingShorthands = other.pendingShorthands == null ? null : new HashMap<>(other.pendingShorthands);
         // 动画/过渡每帧复用同一缓冲 copyFrom(base) 后再原地改写字段：必须清 memo，
         // 否则本帧会读到上一帧编译出来的几何。
         resetMetrics();
@@ -1100,6 +1169,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         try {
             Style style = (Style) super.clone();
             style.customProperties = new HashMap<>(this.customProperties);
+            style.pendingShorthands = pendingShorthands == null ? null : new HashMap<>(pendingShorthands);
             // A clone is a value snapshot. Keeping the owner would make CSSOM reads on
             // snapshots observe future element mutations instead of the cloned fields.
             style.inlineOwner = null;

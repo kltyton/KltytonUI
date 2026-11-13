@@ -16,8 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * blits {@code GL_DEPTH_BUFFER_BIT} without checking formats, so copying depth out of a
  * stencilled target into one that still has a plain depth attachment raises
  * {@code GL_INVALID_OPERATION} ("Depth formats do not match") every frame, and the copy
- * silently fails — KubeJS's {@code HighlightRenderer} blits the main target's depth into
- * a PostChain built before KUI enabled stencil, which is exactly that shape.</p>
+ * silently fails when the destination was created before KUI enabled stencil.</p>
  *
  * <p>Handing the pair to
  * {@link io.github.kltyton.kltytonui.spi.KuiRenderService#alignDepthFormatForCopy} keeps the

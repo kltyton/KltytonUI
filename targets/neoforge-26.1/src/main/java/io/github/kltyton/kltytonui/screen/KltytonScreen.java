@@ -77,7 +77,9 @@ public class KltytonScreen extends Screen implements KuiLinkedScreen {
         boolean hasLinkedDocument = linkedDocument != null;
         boolean disposed = hasLinkedDocument && linkedDocument.isDisposed();
         if (shouldCreateLinkedDocument(hasLinkedDocument, disposed)) {
-            linkedDocument = Document.create(templatePath);
+            if (disposed) io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
+            linkedDocument = Document.createForScreen(templatePath);
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.attach(linkedDocument);
             if (linkedDocument != null) {
                 linkedDocument.applyViewport(false);
             }
@@ -183,6 +185,7 @@ public class KltytonScreen extends Screen implements KuiLinkedScreen {
                 document.remove();
             }
         } finally {
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(document);
             linkedDocument = null;
         }
     }

@@ -11,60 +11,204 @@ SVGElement.prototype = Object.create(Element.prototype);
 MathMLElement.prototype = Object.create(Element.prototype);
 if (typeof console === 'undefined') {
   this.console = window.getConsole();
-  this.console.debug = this.console.log;
+  Object.defineProperty(this.console, "debug", {
+    value: this.console.log, writable: true, enumerable: true, configurable: true
+  });
 }
 let localStorage = window.getLocalStorage();
 let sessionStorage = window.getSessionStorage();
 let performance = window.getPerformance();
-let getComputedStyle = (element) => window.getComputedStyle(element);
-// Rhino's Array.from returns empty entries for array-like mapping callbacks.
-Array.from = function(items, mapFn, thisArg) {
-  if (items == null) throw new TypeError('Array.from requires an array-like or iterable object');
-  if (mapFn !== undefined && typeof mapFn !== 'function') throw new TypeError('Array.from mapper must be callable');
-  let source = Object(items);
-  let iteratorMethod = typeof Symbol === 'function' && Symbol.iterator && source[Symbol.iterator];
-  let Constructor = typeof this === 'function' ? this : Array;
-  let result;
-  let index = 0;
-  if (typeof iteratorMethod === 'function') {
-    result = new Constructor();
-    let iterator = iteratorMethod.call(source);
-    let step;
-    while (!(step = iterator.next()).done) {
-      result[index] = mapFn === undefined ? step.value : mapFn.call(thisArg, step.value, index);
-      index++;
+let __kuiNativeWindowMethods = {
+  fetch: window.fetch,
+  requestAnimationFrame: window.requestAnimationFrame,
+  cancelAnimationFrame: window.cancelAnimationFrame,
+  setTimeout: window.setTimeout,
+  clearTimeout: window.clearTimeout,
+  setInterval: window.setInterval,
+  clearInterval: window.clearInterval,
+  createImageBitmap: window.createImageBitmap,
+  createImageBitmapAsync: window.createImageBitmapAsync,
+  getComputedStyle: window.getComputedStyle
+};
+let getComputedStyle = (element) => {
+  let nativeGetComputedStyle = __kuiNativeWindowMethods.getComputedStyle;
+  return nativeGetComputedStyle.call(window, element);
+};
+let __kuiTimerRoots = new Map();
+let __kuiAnimationFrameRoots = new Map();
+function __kuiRetainBridgeValue(value) {
+  return globalThis.__kuiBridge.retain(value);
+}
+function __kuiReleaseBridgeValue(token) {
+  if (token !== null) globalThis.__kuiBridge.release(token);
+}
+function __kuiReleaseRootRecord(roots, key, record) {
+  if (!record || record.released) return;
+  record.released = true;
+  roots.delete(key);
+  __kuiReleaseBridgeValue(record.token);
+}
+function __kuiTrackTimerCancellation(handle, record) {
+  let nativeCancel = handle.cancel;
+  let cancel = function() {
+    try {
+      return nativeCancel.call(handle);
+    } finally {
+      __kuiReleaseRootRecord(__kuiTimerRoots, handle, record);
     }
-  } else {
-    let length = Math.min(Math.max(Math.floor(Number(source.length) || 0), 0), 9007199254740991);
-    result = new Constructor(length);
-    for (; index < length; index++) {
-      result[index] = mapFn === undefined ? source[index] : mapFn.call(thisArg, source[index], index);
+  };
+  try {
+    handle.cancel = cancel;
+  } catch (error) {
+    try {
+      nativeCancel.call(handle);
+    } finally {
+      __kuiReleaseRootRecord(__kuiTimerRoots, handle, record);
     }
+    throw error;
   }
-  result.length = index;
-  return result;
-};
+}
+function __kuiTrackHostPromise(promise) {
+  if (typeof promise.catchError !== 'function') return promise;
+  let nativeThen = promise.then;
+  let tracked = new Promise(function(resolve, reject) {
+    let released = false;
+    let fulfillmentToken = null;
+    let rejectionToken = null;
+    let releaseCallbacks = function() {
+      if (released) return;
+      released = true;
+      __kuiReleaseBridgeValue(fulfillmentToken);
+      __kuiReleaseBridgeValue(rejectionToken);
+    };
+    let fulfillment = function(value) {
+      try {
+        resolve(value);
+      } finally {
+        releaseCallbacks();
+      }
+    };
+    let rejection = function(reason) {
+      try {
+        reject(reason);
+      } finally {
+        releaseCallbacks();
+      }
+    };
+    fulfillmentToken = __kuiRetainBridgeValue(fulfillment);
+    rejectionToken = __kuiRetainBridgeValue(rejection);
+    try {
+      nativeThen.call(
+        promise,
+        window.createCallback(fulfillment),
+        window.createCallback(rejection)
+      );
+    } catch (error) {
+      releaseCallbacks();
+      reject(error);
+    }
+  });
+  function withCatchError(result) {
+    let then = result.then;
+    result.then = function(onFulfilled, onRejected) {
+      return withCatchError(then.call(this, onFulfilled, onRejected));
+    };
+    result.catchError = function(onRejected) { return this.then(undefined, onRejected); };
+    return result;
+  }
+  return withCatchError(tracked);
+}
 let fetch = (url) => {
-  let p = window.fetch(url, document.getBaseURI());
-  p['catch'] = (fn) => p.catchError(fn);
-  return p;
+  let nativeFetch = __kuiNativeWindowMethods.fetch;
+  return __kuiTrackHostPromise(nativeFetch.call(window, url, document.getBaseURI()));
 };
-let requestAnimationFrame = (callback) => window.requestAnimationFrame(window.createCallback(callback));
-let cancelAnimationFrame = (id) => window.cancelAnimationFrame(id);
-let setTimeout = (callback, delay) => window.setTimeout(window.createCallback(callback), delay == null ? 0 : delay);
-let clearTimeout = (handle) => window.clearTimeout(handle);
-let setInterval = (callback, delay) => window.setInterval(window.createCallback(callback), delay == null ? 0 : delay);
-let clearInterval = (handle) => window.clearInterval(handle);
+let requestAnimationFrame = (callback) => {
+  if (typeof callback !== 'function') throw new TypeError('requestAnimationFrame callback must be a function');
+  let id = null;
+  let record = { token: null, released: false };
+  let invoke = function(timestamp) {
+    try {
+      return callback(timestamp);
+    } finally {
+      __kuiReleaseRootRecord(__kuiAnimationFrameRoots, id, record);
+    }
+  };
+  record.token = __kuiRetainBridgeValue(invoke);
+  try {
+    id = __kuiNativeWindowMethods.requestAnimationFrame.call(window, window.createCallback(invoke));
+    __kuiAnimationFrameRoots.set(id, record);
+  } catch (error) {
+    __kuiReleaseRootRecord(__kuiAnimationFrameRoots, id, record);
+    throw error;
+  }
+  return id;
+};
+let cancelAnimationFrame = (id) => {
+  __kuiNativeWindowMethods.cancelAnimationFrame.call(window, id);
+  if (__kuiAnimationFrameRoots.has(id)) {
+    __kuiReleaseRootRecord(__kuiAnimationFrameRoots, id, __kuiAnimationFrameRoots.get(id));
+  }
+};
+let setTimeout = (callback, delay) => {
+  if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
+  let handle = null;
+  let record = { token: null, released: false };
+  let invoke = function(timerHandle) {
+    try {
+      return callback(timerHandle);
+    } finally {
+      __kuiReleaseRootRecord(__kuiTimerRoots, handle, record);
+    }
+  };
+  record.token = __kuiRetainBridgeValue(invoke);
+  try {
+    handle = __kuiNativeWindowMethods.setTimeout.call(window, window.createCallback(invoke), delay == null ? 0 : delay);
+    __kuiTimerRoots.set(handle, record);
+    __kuiTrackTimerCancellation(handle, record);
+  } catch (error) {
+    __kuiReleaseRootRecord(__kuiTimerRoots, handle, record);
+    throw error;
+  }
+  return handle;
+};
+let clearTimeout = (handle) => {
+  __kuiNativeWindowMethods.clearTimeout.call(window, handle);
+  if (__kuiTimerRoots.has(handle)) {
+    __kuiReleaseRootRecord(__kuiTimerRoots, handle, __kuiTimerRoots.get(handle));
+  }
+};
+let setInterval = (callback, delay) => {
+  if (typeof callback !== 'function') throw new TypeError('setInterval callback must be a function');
+  let invoke = function(timerHandle) { return callback(timerHandle); };
+  let record = { token: __kuiRetainBridgeValue(invoke), released: false };
+  let handle = null;
+  try {
+    handle = __kuiNativeWindowMethods.setInterval.call(window, window.createCallback(invoke), delay == null ? 0 : delay);
+    __kuiTimerRoots.set(handle, record);
+    __kuiTrackTimerCancellation(handle, record);
+    return handle;
+  } catch (error) {
+    __kuiReleaseRootRecord(__kuiTimerRoots, handle, record);
+    throw error;
+  }
+};
+let clearInterval = (handle) => {
+  __kuiNativeWindowMethods.clearInterval.call(window, handle);
+  if (__kuiTimerRoots.has(handle)) {
+    __kuiReleaseRootRecord(__kuiTimerRoots, handle, __kuiTimerRoots.get(handle));
+  }
+};
 let createImageBitmap = function(source, sx, sy, sw, sh) {
-  if (arguments.length >= 5) return window.createImageBitmap(source, Number(sx), Number(sy), Number(sw), Number(sh));
-  return window.createImageBitmap(source);
+  let createBitmap = __kuiNativeWindowMethods.createImageBitmap;
+  if (arguments.length >= 5) return createBitmap.call(window, source, Number(sx), Number(sy), Number(sw), Number(sh));
+  return createBitmap.call(window, source);
 };
 let createImageBitmapAsync = function(source, sx, sy, sw, sh) {
+  let createBitmapAsync = __kuiNativeWindowMethods.createImageBitmapAsync;
   let p = arguments.length >= 5
-    ? window.createImageBitmapAsync(source, Number(sx), Number(sy), Number(sw), Number(sh))
-    : window.createImageBitmapAsync(source);
-  p['catch'] = (fn) => p.catchError(fn);
-  return p;
+    ? createBitmapAsync.call(window, source, Number(sx), Number(sy), Number(sw), Number(sh))
+    : createBitmapAsync.call(window, source);
+  return __kuiTrackHostPromise(p);
 };
 
 function OffscreenCanvas(width, height) { return window.createOffscreenCanvas(Number(width) || 0, Number(height) || 0); }
@@ -112,10 +256,39 @@ function __auiDecorateAudio(el) {
     el.play = function() {
       let p = nativePlay.call(el);
       return new Promise(function(resolve, reject) {
-        var fulfilled = window.createCallback(function() { resolve(); });
-        p.then(function() { fulfilled.accept(null); });
-        p.catchError(window.createCallback(function(error) { reject(error); }));
-      });
+          let released = false;
+          let fulfillmentToken = null;
+          let rejectionToken = null;
+          let releaseCallbacks = function() {
+            if (released) return;
+            released = true;
+            __kuiReleaseBridgeValue(fulfillmentToken);
+            __kuiReleaseBridgeValue(rejectionToken);
+          };
+          let fulfillment = function() {
+            try {
+              resolve();
+            } finally {
+              releaseCallbacks();
+            }
+          };
+          let rejection = function(error) {
+            try {
+              reject(error);
+            } finally {
+              releaseCallbacks();
+            }
+          };
+          fulfillmentToken = __kuiRetainBridgeValue(fulfillment);
+          rejectionToken = __kuiRetainBridgeValue(rejection);
+          try {
+            p.then(fulfillment);
+            p.catchError(window.createCallback(rejection));
+          } catch (error) {
+            releaseCallbacks();
+            reject(error);
+          }
+        });
     };
   } catch (e) {}
   return el;
@@ -1181,14 +1354,48 @@ function __auiDecorateElement(el) {
 }
 
 function ResizeObserver(callback) {
-  let nativeObserver = window.createResizeObserver(window.createCallback(function(entries) {
+  if (typeof callback !== 'function') throw new TypeError('ResizeObserver callback must be a function');
+  let callbackFunction = function(entries) {
     if (!callback) return;
     callback(__auiDecorateResizeEntries(entries), observer);
-  }));
+  };
+  let callbackToken = null;
+  let observedTargets = new Set();
+  let callbackRoot = { callback: callbackFunction, targets: observedTargets };
+  let disconnected = false;
+  let nativeObserver = window.createResizeObserver(window.createCallback(callbackFunction));
   let observer = {
-    observe: function(target) { nativeObserver.observe(__auiDecorateElement(target)); },
-    unobserve: function(target) { nativeObserver.unobserve(__auiDecorateElement(target)); },
-    disconnect: function() { nativeObserver.disconnect(); }
+    observe: function(target) {
+      let element = __auiDecorateElement(target);
+      if (!element || disconnected) return nativeObserver.observe(element);
+      if (callbackToken === null) callbackToken = __kuiRetainBridgeValue(callbackRoot);
+      try {
+        nativeObserver.observe(element);
+        observedTargets.add(element);
+      } catch (error) {
+        if (observedTargets.size === 0) {
+          __kuiReleaseBridgeValue(callbackToken);
+          callbackToken = null;
+        }
+        throw error;
+      }
+    },
+    unobserve: function(target) {
+      let element = __auiDecorateElement(target);
+      nativeObserver.unobserve(element);
+      observedTargets.delete(element);
+      if (observedTargets.size === 0 && callbackToken !== null) {
+        __kuiReleaseBridgeValue(callbackToken);
+        callbackToken = null;
+      }
+    },
+    disconnect: function() {
+      nativeObserver.disconnect();
+      disconnected = true;
+      observedTargets.clear();
+      __kuiReleaseBridgeValue(callbackToken);
+      callbackToken = null;
+    }
   };
   return observer;
 }
@@ -1247,15 +1454,40 @@ IntersectionObserver.prototype = {
     if (!target || typeof target.getNodeType !== 'function' || target.getNodeType() !== 1) {
       throw new TypeError('IntersectionObserver target must be an Element');
     }
-    this.__auiNativeObserver.observe(__auiDecorateElement(target));
+    let element = __auiDecorateElement(target);
+    if (element.ownerDocument !== document) return;
+    if (this.__kuiCallbackToken === null) {
+      this.__kuiCallbackToken = __kuiRetainBridgeValue(this.__kuiCallbackRoot);
+    }
+    try {
+      this.__auiNativeObserver.observe(element);
+      this.__kuiObservedTargets.add(element);
+    } catch (error) {
+      if (this.__kuiObservedTargets.size === 0) {
+        __kuiReleaseBridgeValue(this.__kuiCallbackToken);
+        this.__kuiCallbackToken = null;
+      }
+      throw error;
+    }
   },
   unobserve: function(target) {
     if (!target || typeof target.getNodeType !== 'function' || target.getNodeType() !== 1) {
       throw new TypeError('IntersectionObserver target must be an Element');
     }
-    this.__auiNativeObserver.unobserve(__auiDecorateElement(target));
+    let element = __auiDecorateElement(target);
+    this.__auiNativeObserver.unobserve(element);
+    this.__kuiObservedTargets.delete(element);
+    if (this.__kuiObservedTargets.size === 0 && this.__kuiCallbackToken !== null) {
+      __kuiReleaseBridgeValue(this.__kuiCallbackToken);
+      this.__kuiCallbackToken = null;
+    }
   },
-  disconnect: function() { this.__auiNativeObserver.disconnect(); },
+  disconnect: function() {
+    this.__auiNativeObserver.disconnect();
+    this.__kuiObservedTargets.clear();
+    __kuiReleaseBridgeValue(this.__kuiCallbackToken);
+    this.__kuiCallbackToken = null;
+  },
   takeRecords: function() {
     return __auiDecorateIntersectionEntries(this.__auiNativeObserver.takeRecords());
   }
@@ -1300,11 +1532,17 @@ function IntersectionObserver(callback, options) {
   delay = Math.floor(delay);
   let trackVisibility = !!options.trackVisibility;
   let observer = null;
-  let nativeObserver = window.createIntersectionObserver(window.createCallback(function(entries) {
+  let callbackFunction = function(entries) {
     if (!observer) return;
     callback.call(observer, __auiDecorateIntersectionEntries(entries), observer);
-  }), root, rootMargin, scrollMargin, thresholds, delay, trackVisibility);
+  };
+  let nativeObserver = window.createIntersectionObserver(window.createCallback(callbackFunction), root, rootMargin, scrollMargin, thresholds, delay, trackVisibility);
   observer = Object.create(IntersectionObserver.prototype);
+  Object.defineProperty(observer, '__kuiCallbackToken', { value: null, writable: true });
+  Object.defineProperty(observer, '__kuiObservedTargets', { value: new Set() });
+  Object.defineProperty(observer, '__kuiCallbackRoot', {
+    value: { callback: callbackFunction, targets: observer.__kuiObservedTargets }
+  });
   try {
     Object.defineProperty(observer, '__auiNativeObserver', { value: nativeObserver, configurable: false });
   } catch (e) {
@@ -1323,17 +1561,41 @@ function IntersectionObserver(callback, options) {
 }
 
 function MutationObserver(callback) {
-  let nativeObserver = document.createMutationObserver(window.createCallback(function(records) {
+  if (typeof callback !== 'function') throw new TypeError('MutationObserver callback must be a function');
+  let callbackFunction = function(records) {
     if (!callback) return;
     callback(__auiDecorateMutationRecords(records), observer);
-  }));
+  };
+  let callbackToken = null;
+  let observedTargets = new Set();
+  let callbackRoot = { callback: callbackFunction, targets: observedTargets };
+  let disconnected = false;
+  let nativeObserver = document.createMutationObserver(window.createCallback(callbackFunction));
   let observer = {
     observe: function(target, options) {
       options = options || {};
       let filter = options.attributeFilter && options.attributeFilter.length ? options.attributeFilter.join(',') : null;
-      nativeObserver.observe(__auiDecorateElement(target), !!options.childList, !!options.attributes, !!options.characterData, !!options.subtree, !!options.attributeOldValue, !!options.characterDataOldValue, filter);
+      let element = __auiDecorateElement(target);
+      if (!element || disconnected) return nativeObserver.observe(element, !!options.childList, !!options.attributes, !!options.characterData, !!options.subtree, !!options.attributeOldValue, !!options.characterDataOldValue, filter);
+      if (callbackToken === null) callbackToken = __kuiRetainBridgeValue(callbackRoot);
+      try {
+        nativeObserver.observe(element, !!options.childList, !!options.attributes, !!options.characterData, !!options.subtree, !!options.attributeOldValue, !!options.characterDataOldValue, filter);
+        observedTargets.add(element);
+      } catch (error) {
+        if (observedTargets.size === 0) {
+          __kuiReleaseBridgeValue(callbackToken);
+          callbackToken = null;
+        }
+        throw error;
+      }
     },
-    disconnect: function() { nativeObserver.disconnect(); },
+    disconnect: function() {
+      nativeObserver.disconnect();
+      disconnected = true;
+      observedTargets.clear();
+      __kuiReleaseBridgeValue(callbackToken);
+      callbackToken = null;
+    },
     takeRecords: function() { return __auiDecorateMutationRecords(nativeObserver.takeRecords()); }
   };
   return observer;
@@ -1382,13 +1644,7 @@ try {
   let __auiFetch = fetch;
   fetch = function(url) {
     let p = __auiFetch(url);
-    let origThen = p.then;
-    p.then = function(onFulfilled, onRejected) {
-      if (!onFulfilled) return origThen.call(p, onFulfilled, onRejected);
-      return origThen.call(p, function(resp) { return onFulfilled(__auiDecorateResponse(resp)); }, onRejected);
-    };
-    p['catch'] = (fn) => p.catchError(fn);
-    return p;
+    return p.then(__auiDecorateResponse);
   };
   window.scrollTo = function(x, y) {
     if (typeof x === 'object' && x) return document.scrollTo(Number(x.left || 0), Number(x.top || 0));
@@ -1439,8 +1695,63 @@ try {
 }
 // Node/NodeFilter 常量独立定义:放在 try 块之外,保证任何桥包装失败都不影响
 // 页面脚本使用 Node.ELEMENT_NODE / NodeFilter.SHOW_TEXT(浏览器全局常量)。
-// 注意:此 Rhino fork 无 globalThis,直接声明为顶层 var(与页面脚本同一 top-level scope)。
 var Node = { ELEMENT_NODE: 1, ATTRIBUTE_NODE: 2, TEXT_NODE: 3, CDATA_SECTION_NODE: 4,
              COMMENT_NODE: 8, DOCUMENT_NODE: 9, DOCUMENT_FRAGMENT_NODE: 11 };
 var NodeFilter = { SHOW_ALL: 0xFFFFFFFF, SHOW_TEXT: 4 };
 __auiInstallTextBridge();
+{
+  let browserGlobals = {
+    window: window,
+    self: window,
+    document: document,
+    localStorage: localStorage,
+    sessionStorage: sessionStorage,
+    performance: performance,
+    getComputedStyle: getComputedStyle,
+    fetch: fetch,
+    requestAnimationFrame: requestAnimationFrame,
+    cancelAnimationFrame: cancelAnimationFrame,
+    setTimeout: setTimeout,
+    clearTimeout: clearTimeout,
+    setInterval: setInterval,
+    clearInterval: clearInterval,
+    queueMicrotask: globalThis.queueMicrotask,
+    createImageBitmap: createImageBitmap,
+    createImageBitmapAsync: createImageBitmapAsync,
+    Element: Element,
+    HTMLElement: HTMLElement,
+    HTMLInputElement: HTMLInputElement,
+    SVGElement: SVGElement,
+    MathMLElement: MathMLElement,
+    OffscreenCanvas: OffscreenCanvas,
+    DOMMatrix: DOMMatrix,
+    Blob: Blob,
+    URL: URL,
+    Image: Image,
+    Audio: Audio,
+    Event: Event,
+    CustomEvent: CustomEvent,
+    MouseEvent: MouseEvent,
+    WheelEvent: WheelEvent,
+    PointerEvent: PointerEvent,
+    URLSearchParams: URLSearchParams,
+    FormData: FormData,
+    ResizeObserver: ResizeObserver,
+    IntersectionObserver: IntersectionObserver,
+    IntersectionObserverEntry: IntersectionObserverEntry,
+    MutationObserver: MutationObserver,
+    Node: Node,
+    NodeFilter: NodeFilter
+  };
+  if (typeof globalThis.console !== 'undefined') browserGlobals.console = globalThis.console;
+  if (typeof globalThis.location !== 'undefined') browserGlobals.location = globalThis.location;
+  Object.keys(browserGlobals).forEach(function(name) {
+    globalThis[name] = browserGlobals[name];
+    Object.defineProperty(window, name, {
+      value: browserGlobals[name], writable: true, enumerable: true, configurable: true
+    });
+  });
+  Object.defineProperty(window, 'globalThis', {
+    value: globalThis, writable: true, enumerable: true, configurable: true
+  });
+}

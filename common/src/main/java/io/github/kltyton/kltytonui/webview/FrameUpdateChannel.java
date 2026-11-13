@@ -31,6 +31,8 @@ public final class FrameUpdateChannel {
     /** Acquire/release access to naturally aligned little-endian long fields in the mapping. */
     private static final VarHandle LONG_VIEW = MethodHandles.byteBufferViewVarHandle(
             long[].class, ByteOrder.LITTLE_ENDIAN);
+    private static final VarHandle INT_VIEW = MethodHandles.byteBufferViewVarHandle(
+            int[].class, ByteOrder.LITTLE_ENDIAN);
 
     /** {@code "AUIC"} as little-endian bytes; the header's magic. */
     private static final int MAGIC = 0x43495541;
@@ -88,6 +90,11 @@ public final class FrameUpdateChannel {
          *               {@code width * height} entries; owned by the reader and reused.
          */
         void rect(int x, int y, int width, int height, int[] pixels);
+
+        /** Attempts to apply pixels directly from the channel before its read cursor advances. */
+        default boolean rectDirect(int x, int y, int width, int height, ByteBuffer pixels, int byteOffset) {
+            return false;
+        }
     }
 
     private final ByteBuffer buffer;
@@ -126,8 +133,18 @@ public final class FrameUpdateChannel {
     /** Asks the host for a full canvas refresh on its next publish. */
     public void requestFullRefresh() {
         if (valid) {
-            buffer.putInt(OFF_FLAGS, buffer.getInt(OFF_FLAGS) | FLAG_NEEDS_FULL_REFRESH);
+            INT_VIEW.getAndBitwiseOr(buffer, OFF_FLAGS, FLAG_NEEDS_FULL_REFRESH);
         }
+    }
+
+    /** Discards packets after a failed apply and rebuilds the target from a full frame. */
+    public void recoverAfterFailedApply() {
+        if (!valid) return;
+        long writeLimit = (long) LONG_VIEW.getAcquire(buffer, OFF_WRITE_OFFSET);
+        long writeSequenceLimit = (long) LONG_VIEW.getAcquire(buffer, OFF_WRITE_SEQ);
+        canvasWidth = 0;
+        canvasHeight = 0;
+        resync(writeLimit, writeSequenceLimit);
     }
 
     /** False when the buffer is missing or carries a layout this reader does not know. */
@@ -261,12 +278,14 @@ public final class FrameUpdateChannel {
                     intact = false;
                     break;
                 }
-                if (rectanglePixels.length < count) {
-                    rectanglePixels = new int[count];
+                if (!target.rectDirect(x, y, width, height, buffer, offset)) {
+                    if (rectanglePixels.length < count) {
+                        rectanglePixels = new int[count];
+                    }
+                    readPixels(offset, rectanglePixels, count);
+                    target.rect(x, y, width, height, rectanglePixels);
                 }
-                readPixels(offset, rectanglePixels, count);
                 offset += count * 4;
-                target.rect(x, y, width, height, rectanglePixels);
                 appliedRects++;
             }
             if (!intact) {

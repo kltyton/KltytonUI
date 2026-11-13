@@ -5,12 +5,10 @@ import io.github.kltyton.kltytonui.config.KltytonUIConfig;
 import io.github.kltyton.kltytonui.registry.KltytonMenus;
 import io.github.kltyton.kltytonui.registry.KltytonUIRegistry;
 import io.github.kltyton.kltytonui.network.NetworkPlatform;
-import io.github.kltyton.kltytonui.script.KubeJS;
 import io.github.kltyton.kltytonui.util.KuiLogging;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
@@ -38,10 +36,6 @@ public final class KltytonUINeoForge {
         // ReflectionUtils); menus must be bound to the mod event bus before any
         // client code touches KLTYTONUI_CONTAINER, or the holder stays unbound.
         KltytonUIRegistry.scanPackages("io.github.kltyton.kltytonui.element", "io.github.kltyton.kltytonui.element");
-        if (ModList.get().isLoaded("kubejs")) {
-            KubeJS.scanPackage("io.github.kltyton.kltytonui.util.kjs");
-            KubeJS.scanPackage("io.github.kltyton.kltytonui.container.filter");
-        }
         KltytonMenus.register(modEventBus);
 
         modContainer.registerConfig(ModConfig.Type.CLIENT, KltytonUIConfig.CLIENT_SPEC,

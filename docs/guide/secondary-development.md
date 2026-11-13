@@ -1,6 +1,6 @@
-# 二次开发：自定义元素与 KubeJS 绑定
+# 二次开发：自定义元素与帧耗时 HUD
 
-面向想给 KUI 加东西的模组作者。三个扩展点：自定义 DOM 元素、KubeJS 全局绑定、帧耗时 HUD。KubeJS 绑定目前只在 Forge 1.20.1 和 NeoForge 1.21.1 target 中注册；页面脚本也只在 Forge 1.20.1、NeoForge 1.21.1 和 NeoForge 26.1 执行。页面侧 API 见 [Web API 文档](web-api)，内置扩展标签的用法见[扩展元素文档](extension-elements)。
+模组可注册自定义 DOM 元素，并使用帧耗时 HUD。页面脚本见 [Web API](web-api)，内置标签见[扩展元素](extension-elements)。
 
 ## 先守住的两条边界
 
@@ -71,37 +71,6 @@ KltytonUIRegistry.scanPackage("com.example.mod.ui");
 - 不需要自定义绘制的元素不用覆写 `drawPhase`，CSS 照常生效；
 - 自定义绘制时：尺寸从 `Box.of(this)` / `getBoundingClientRect()` 取；先处理零尺寸和资源未就绪；别每帧创建 DynamicTexture、解析字符串、触发布局；资源异步就绪后更新内部状态并 `document.markDirty(this, ...)`。
 
-## 注册 KubeJS 绑定
-
-这部分仅适用于 Forge 1.20.1 和 NeoForge 1.21.1 target；Fabric targets 与 NeoForge 26.1 当前不注册 KUI 的 KubeJS 绑定。
-
-静态方法类加 `@KJSBindings`，类作为全局对象进脚本：
-
-```java
-@KJSBindings(value = "ExampleKui", modId = "examplemod", isClient = true)
-public final class ExampleKuiBindings {
-    private ExampleKuiBindings() {}
-
-    public static String hello(String name) {
-        return "Hello, " + name;
-    }
-}
-```
-
-```javascript
-// 页面脚本里
-console.log(ExampleKui.hello("Kltyton"));
-```
-
-模组初始化时登记：`KubeJS.scanPackage("com.example.mod.kjs")`。
-
-- `value` 空则用简单类名；`modId` 填了则该模组加载时才注册；
-- `isClient = true` 进客户端脚本（Document/Toast/WorldWindow 这类），`false` 进服务端脚本（容器、玩家数据）——它是注册过滤条件，**不是**侧安全保证：客户端绑定类引用了 MC 客户端类的话，别把它注册到服务端；
-- 全局名带模组前缀；返回值用 null/Optional 表达失败并在文档里写清楚；
-- 绑定方法保持公开静态，参数和返回值用 Rhino 能稳定转换的类型；别把复杂 DOM 遍历塞进脚本每帧调用。
-
-改注解或扫描包后要重启 KubeJS/客户端，「重载资源」操作只重载页面资源。
-
 ## frameTimingHud：帧耗时 HUD
 
 `config/kltytonui-client.toml`：
@@ -129,6 +98,5 @@ max 2.31 ms  min 0.42 ms  avg 0.88 ms  g 12 img 3 sb 7  ly 0 tf 1  item 26 x0.08
 
 **注册后页面初始化报错**：看带路径和标签名的 KUI 错误日志。属性初始化是不是写构造器里了——挪到 `onInitFromDom`。绘制时检查尺寸、资源句柄、document 有效性。
 
-**KJS 全局对象不存在**：KubeJS 加载了吗？scanPackage 调了吗？modId 对应模组在吗？脚本运行侧和 `isClient` 匹配吗？改完重启。
 
 **HUD 数值忽高忽低**：DevTools、资源管理器这类内置页面本身会改变批次。用连续 120 帧的 avg 看趋势、max 找尖峰，别拿单帧波动当回归。

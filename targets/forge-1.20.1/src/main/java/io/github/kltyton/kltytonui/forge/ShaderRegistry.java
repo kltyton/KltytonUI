@@ -38,6 +38,8 @@ public class ShaderRegistry {
                 new ResourceLocation("kltytonui", "filter_mask_exclude"), DefaultVertexFormat.POSITION_TEX), (instance) -> {
             filterMaskExcludeShader = instance;
         });
+        event.registerShader(new ShaderInstance(event.getResourceProvider(),
+                new ResourceLocation("kltytonui", "background"), DefaultVertexFormat.POSITION_TEX), instance -> backgroundShader = instance);
     }
 
     private static ShaderInstance filterShader;
@@ -47,6 +49,7 @@ public class ShaderRegistry {
     private static ShaderInstance filterMaskIntersectShader;
     private static ShaderInstance filterMaskSubtractShader;
     private static ShaderInstance filterMaskExcludeShader;
+    private static ShaderInstance backgroundShader;
 
     public static void init(ResourceManager resourceManager) throws IOException {
         filterShader = new ShaderInstance(resourceManager, new ResourceLocation("kltytonui", "filter"), DefaultVertexFormat.POSITION_TEX);
@@ -56,6 +59,7 @@ public class ShaderRegistry {
         filterMaskIntersectShader = new ShaderInstance(resourceManager, new ResourceLocation("kltytonui", "filter_mask_intersect"), DefaultVertexFormat.POSITION_TEX);
         filterMaskSubtractShader = new ShaderInstance(resourceManager, new ResourceLocation("kltytonui", "filter_mask_subtract"), DefaultVertexFormat.POSITION_TEX);
         filterMaskExcludeShader = new ShaderInstance(resourceManager, new ResourceLocation("kltytonui", "filter_mask_exclude"), DefaultVertexFormat.POSITION_TEX);
+        backgroundShader = new ShaderInstance(resourceManager, new ResourceLocation("kltytonui", "background"), DefaultVertexFormat.POSITION_TEX);
     }
 
     public static ShaderInstance getFilterShader() {
@@ -85,4 +89,6 @@ public class ShaderRegistry {
     public static ShaderInstance getFilterMaskExcludeShader() {
         return filterMaskExcludeShader;
     }
+
+    public static ShaderInstance getBackgroundShader() { return backgroundShader; }
 }

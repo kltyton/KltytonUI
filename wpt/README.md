@@ -147,7 +147,7 @@ scrollbar presence.
 
 ### 2. Semantic Lane: testharness conversion
 
-WPT `testharness.js` tests cannot be run directly under Rhino. Extract each
+The KUI WPT runner consumes declarative probe fixtures. Extract each
 adopted assertion into a declarative probe fixture plus a JUnit assertion.
 Chromium is still run first to verify the fixture represents the WPT result.
 

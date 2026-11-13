@@ -7,6 +7,6 @@ import net.minecraft.client.gui.screens.MenuScreens;
 public final class ClientMenuScreens {
     private ClientMenuScreens() { }
     public static void register() {
-        MenuScreens.register(KltytonMenus.KLTYTONUI_CONTAINER, KltytonContainerScreen::new);
+        MenuScreens.register(KltytonMenus.KLTYTONUI_CONTAINER, KltytonContainerScreen<KltytonContainerMenu>::new);
     }
 }

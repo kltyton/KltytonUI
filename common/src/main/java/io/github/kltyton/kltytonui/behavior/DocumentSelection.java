@@ -1,10 +1,13 @@
 package io.github.kltyton.kltytonui.behavior;
 
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.init.Node;
 import io.github.kltyton.kltytonui.render.Drawer;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 文档级文字选择：锚点与终点均为（单元, 偏移），可跨单元、跨兄弟节点。
@@ -177,6 +180,14 @@ public final class DocumentSelection {
 
     public Element getEndUnit() {
         return endUnit;
+    }
+
+    @HideFromScript
+    public void collectScriptRoots(Set<Node> roots) {
+        if (anchorUnit != null) roots.add(anchorUnit);
+        if (endUnit != null) roots.add(endUnit);
+        if (granularityUnit != null) roots.add(granularityUnit);
+        if (pendingCollapseUnit != null) roots.add(pendingCollapseUnit);
     }
 
     public int getAnchorOffset() {

@@ -31,6 +31,14 @@ public final class FabricDocumentExpander implements DocumentExpander {
     }
 
     @Override
+    public boolean supportsInnerHtmlBatch(Document document, Node parent) {
+        return parent instanceof io.github.kltyton.kltytonui.init.Element
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Slot)
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Ingredient)
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Item);
+    }
+
+    @Override
     public void validateRuntimeInsertion(Document document, Node parent, Node child) {
         SlotContentRules.validateRuntimeInsertion(parent, child);
     }

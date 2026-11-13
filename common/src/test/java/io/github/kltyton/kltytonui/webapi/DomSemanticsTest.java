@@ -428,7 +428,8 @@ class DomSemanticsTest {
         host.removeChild(child);
         host.appendChild(textNode);
         host.appendChild(commentNode);
-        assertEquals("text-childcomment-child", host.getTextContent());
+        assertEquals("text-child", host.getTextContent());
+        assertEquals("comment-child", commentNode.getTextContent());
         assertEquals("text-child<!--comment-child-->", host.getInnerHTML());
         assertEquals("<div>text-child<!--comment-child--></div>", host.getOuterHTML());
         assertEquals(List.of(textNode, commentNode), host.getChildNodes());
@@ -599,7 +600,8 @@ class DomSemanticsTest {
         host.appendChild(nested);
         host.appendChild(textNode);
         host.appendChild(commentNode);
-        assertEquals("beforemarker", host.getTextContent());
+        assertEquals("before", host.getTextContent());
+        assertEquals("marker", commentNode.getTextContent());
 
         host.setTextContent("reset");
         assertEquals("reset", host.getTextContent());

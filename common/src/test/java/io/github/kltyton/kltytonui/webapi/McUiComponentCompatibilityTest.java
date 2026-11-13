@@ -9,23 +9,13 @@ import io.github.kltyton.kltytonui.element.Path;
 import io.github.kltyton.kltytonui.element.Select;
 import io.github.kltyton.kltytonui.element.Svg;
 import io.github.kltyton.kltytonui.element.TextArea;
-import io.github.kltyton.kltytonui.event.Event;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
-import io.github.kltyton.kltytonui.init.Window;
-import io.github.kltyton.kltytonui.loader.Loader;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.parser.CSS;
 import io.github.kltyton.kltytonui.resource.Font;
-import io.github.kltyton.kltytonui.script.ecmascript.EcmaEventListener;
-import io.github.kltyton.kltytonui.spi.KuiScriptService;
-import io.github.kltyton.kltytonui.spi.KuiServices;
 import io.github.kltyton.kltytonui.style.Background;
 import io.github.kltyton.kltytonui.util.DataUri;
-import dev.latvian.mods.rhino.Callable;
-import dev.latvian.mods.rhino.Context;
-import dev.latvian.mods.rhino.Scriptable;
-import dev.latvian.mods.rhino.ScriptableObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,9 +28,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -50,33 +37,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class McUiComponentCompatibilityTest {
     private static final String RESOURCE_ROOT =
             "assets/kltytonui/kltytonui/kltytonui/runtime/";
-    private KuiScriptService previousScriptService;
+    private VueBundleCompatibilityTest.Page page;
 
     @BeforeEach
     void captureScriptService() {
-        previousScriptService = KuiServices.script();
         registerBrowserElements();
+        page = new VueBundleCompatibilityTest.Page();
     }
 
     @AfterEach
     void restoreScriptService() {
-        KuiServices.setScript(previousScriptService);
+        page.close();
     }
 
     @Test
     void latestPluginRegistersSixtyEightComponentsAndStylesCheckedControl() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
+        Document document = page.document;
         Map<String, Map<String, CSS.Declaration>> css = new LinkedHashMap<>();
         CSS.readCSS(read("mcui/components.css"), css, "runtime/mcui/components.css");
         document.CSSCache.putAll(css);
         document.rebuildSelectorIndex();
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
 
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js");
-            result = context.evaluateString(scope, """
+            load("mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js");
+            result = page.result( """
                     var root = document.createElement('div'); document.body.appendChild(root);
                     var Root = {render:function(){return Vue.h(McUIVue.McApp,null,{
                       default:function(){return Vue.h(McUIVue.McCheckbox,{modelValue:true,label:'Checked'});}
@@ -85,12 +70,12 @@ class McUiComponentCompatibilityTest {
                     app.config.throwUnhandledErrorInProduction = true;
                     app.use(McUIVue.createMcUI({sounds:{enabled:false},
                       icons:{sets:{mc:McUINormalIcons.mcNormalIconSet}}}));
-                    app.mount(root);
+                    app.mount(root); globalThis.__testApp=app;
                     var names = Object.keys(McUIVue).filter(function(name){return /^Mc[A-Z]/.test(name);});
-                    names.length + '|' + (typeof McUIVue.McSkinViewer) + '|'
+                    return names.length + '|' + (typeof McUIVue.McSkinViewer) + '|'
                       + !!root.querySelector('.mc-app') + '|'
                       + !!root.querySelector('.mc-checkbox__mark img');
-                    """, "mcui2-checkbox", 1, null);
+                    """, "mcui2-checkbox");
         }
         try {
             assertEquals("68|undefined|true|true", result);
@@ -106,23 +91,21 @@ class McUiComponentCompatibilityTest {
             assertEquals(0xFF316D20, io.github.kltyton.kltytonui.parser.Color.parse(hover), hover);
         } finally {
             try (Document.ContextScope ignored = Document.withContext(document)) {
-                context.evaluateString(scope, "app.unmount();", "mcui2-unmount", 1, null);
+                page.eval("globalThis.__testApp.unmount();", "mcui2-unmount");
             }
         }
     }
 
     @Test
     void latestUpstreamGalleryMountsAllRetainedComponents() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
+        Document document = page.document;
         document.body.setAttribute("style", "width:1280px;height:720px");
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
 
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js",
+            load("mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js",
                     "mcui/gallery.kui.js");
-            result = context.evaluateString(scope, """
+            result = page.result( """
                     var root=document.createElement('div');document.body.appendChild(root);
                     var app=Vue.createApp(McUIVisualGallery.default);
                     var errors=[];
@@ -151,8 +134,8 @@ class McUiComponentCompatibilityTest {
                     var proxyArrayState=Array.isArray(proxyList)+'/'
                       +(typeof proxyList.includes==='function' ? proxyList.includes('survival') : 'no-includes');
                     app.unmount();
-                    count+'|'+errors.slice(0,3).join(';')+'|'+virtualText+'|'+mapped.join(',')+'|'+tabsState+'|'+proxyArrayState+'|'+listState;
-                    """, "mcui2-gallery", 1, null);
+                    return count+'|'+errors.slice(0,3).join(';')+'|'+virtualText+'|'+mapped.join(',')+'|'+tabsState+'|'+proxyArrayState+'|'+listState;
+                    """, "mcui2-gallery");
         }
         assertEquals("68||Chunk 1|Chunk 1,Chunk 2,Chunk 3|false/true/null/Selected: worlds|true/true|true/true", result);
     }
@@ -163,7 +146,7 @@ class McUiComponentCompatibilityTest {
                 RESOURCE_ROOT + "mcui/fonts/minecraft_seven.otf")) {
             assertTrue(Font.registerFont("Minecraft Seven", font));
         }
-        Document document = TestDocumentFactory.createDocument();
+        Document document = page.document;
         document.body.setAttribute("style", "width:1920px;height:1080px;margin:0");
         Map<String, Map<String, CSS.Declaration>> css = new LinkedHashMap<>();
         CSS.readCSS(read("mcui/components.css"), css, "runtime/mcui/components.css");
@@ -171,14 +154,12 @@ class McUiComponentCompatibilityTest {
         CSS.readCSS(read("mcui/gallery.css"), css, "runtime/mcui/gallery.css");
         document.CSSCache.putAll(css);
         document.rebuildSelectorIndex();
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
 
         Object heights;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js",
+            load("mcui/mcui-oreui.kui.js", "mcui/mcui-icons-normal.kui.js",
                     "mcui/gallery.kui.js");
-            heights = context.evaluateString(scope, """
+            heights = page.result( """
                     var root=document.createElement('div');document.body.appendChild(root);
                     var app=Vue.createApp(McUIVisualGallery.default);
                     app.use(McUIVue.createMcUI({sounds:{enabled:false},
@@ -197,15 +178,15 @@ class McUiComponentCompatibilityTest {
                     heights+='|'+Array.from(group.querySelectorAll('.mc-radio__label'))
                       .map(function(el){return el.innerText;}).join(',');
                     app.unmount();
-                    heights;
-                    """, "mcui2-radio-group-geometry", 1, null);
+                    return heights;
+                    """, "mcui2-radio-group-geometry");
         }
         assertEquals("60|15|11|28|60|28|28|28|1|24|43|Survival,Creative", heights);
     }
 
     @Test
     void dialogParagraphUsesBrowserMarginsWithoutChangingHostDefault() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
+        Document document = page.document;
         Map<String, Map<String, CSS.Declaration>> css = new LinkedHashMap<>();
         try (InputStream input = McUiComponentCompatibilityTest.class.getClassLoader()
                 .getResourceAsStream("assets/kltytonui/kltytonui/global.css")) {
@@ -237,17 +218,12 @@ class McUiComponentCompatibilityTest {
 
     @Test
     void nativeButtonCheckboxAndSwitchEventsReachVue() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
-        CountDownLatch updated = new CountDownLatch(1);
-        RhinoTestSupport.putProperty(context, scope, "__auiUpdated",
-                RhinoTestSupport.wrap(context, scope, updated));
+        Document document = page.document;
 
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js");
-            result = context.evaluateString(scope, """
+            load("mcui/mcui-oreui.kui.js");
+            result = page.result( """
                     var clicks=0,checked=Vue.ref(false),switched=Vue.ref(false);
                     var root=document.createElement('div');document.body.appendChild(root);
                     var Root={render:function(){return Vue.h(McUIVue.McApp,null,{
@@ -275,24 +251,22 @@ class McUiComponentCompatibilityTest {
                     root.querySelector('.mc-switch__input').click();
                     var answer=clicks+'|'+checked.value+'|'+switched.value+'|'
                       +(document.activeElement===checkbox)+'|'+hits+'|'+prevented;
-                    Vue.nextTick(function(){__auiUpdated.countDown();});answer;
-                    """, "mcui2-control-events", 1, null);
+                    Vue.nextTick(function(){document.body.setAttribute('data-updated','yes');});return answer;
+                    """, "mcui2-control-events");
         }
         assertEquals("1|true|true|true|1|false", result);
-        assertTrue(updated.await(2, TimeUnit.SECONDS));
+        assertEquals("yes", page.awaitAttribute("data-updated", 2000));
         assertTrue(document.querySelector(".mc-switch__input").isChecked());
     }
 
     @Test
     void numberTextFieldFiltersInvalidCharacters() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
+        Document document = page.document;
 
         Object result;
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js");
-            result = context.evaluateString(scope, """
+            load("mcui/mcui-oreui.kui.js");
+            result = page.result( """
                     var value=Vue.ref(''),invalid=0;
                     var root=document.createElement('div');document.body.appendChild(root);
                     var Root={render:function(){return Vue.h(McUIVue.McApp,null,{
@@ -307,39 +281,34 @@ class McUiComponentCompatibilityTest {
                     app.use(McUIVue.createMcUI({sounds:{enabled:false}}));app.mount(root);
                     var input=root.querySelector('input.mc-input');
                     input.value='12a3';input.dispatchEvent(window.createEvent('input',true));
-                    value.value+'|'+invalid+'|'+input.value;
-                    """, "mcui2-number-filter", 1, null);
+                    return value.value+'|'+invalid+'|'+input.value;
+                    """, "mcui2-number-filter");
         }
         assertEquals("123|1|123", result);
     }
 
     @Test
     void pixelIconCompletesTheBlobImageCanvasPipeline() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
+        Document document = page.document;
         Element root = document.createElement("div");
         document.body.appendChild(root);
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = browserScope(context, document);
-        CountDownLatch completed = new CountDownLatch(1);
-        RhinoTestSupport.putProperty(context, scope, "__auiPixelDone",
-                RhinoTestSupport.wrap(context, scope, completed));
 
         try (Document.ContextScope ignored = Document.withContext(document)) {
-            load(context, scope, "mcui/mcui-oreui.kui.js");
-            context.evaluateString(scope, """
+            load("mcui/mcui-oreui.kui.js");
+            page.eval("""
                     var Root={render:function(){return Vue.h(McUIVue.McIcon,{
                       path:'M2 2h20v20H2z',viewBox:'0 0 24 24',pixelSize:24,color:'#35d04f'});}};
                     var app=Vue.createApp(Root);
                     app.config.throwUnhandledErrorInProduction=true;
-                    app.use(McUIVue.createMcUI({sounds:{enabled:false}}));app.mount(__auiTestDocument.body.firstChild);
+                    app.use(McUIVue.createMcUI({sounds:{enabled:false}}));app.mount(document.body.firstChild);
                     (function waitForPixel(){
-                      var image=__auiTestDocument.body.firstChild.querySelector('img');
-                      if(image&&image.getAttribute('src')){__auiPixelDone.countDown();return;}
+                      var image=document.body.firstChild.querySelector('img');
+                      if(image&&image.getAttribute('src')){document.body.setAttribute('data-pixel-done','yes');return;}
                       setTimeout(waitForPixel,10);
                     }());
-                    """, "mcui2-pixel-icon", 1, null);
+                    """, "mcui2-pixel-icon");
         }
-        assertTrue(completed.await(10, TimeUnit.SECONDS), "pixel icon callback did not complete");
+        assertEquals("yes", page.awaitAttribute("data-pixel-done", 10000), "pixel icon callback did not complete");
         Element image = root.getElementsByTagName("img").stream().findFirst().orElse(null);
         assertNotNull(image);
         assertTrue(image.getAttribute("src").startsWith("data:image/png;base64,"));
@@ -370,26 +339,9 @@ class McUiComponentCompatibilityTest {
         Element.register(Canvas.TAG_NAME, (owner, tag) -> new Canvas(owner));
     }
 
-    private static void load(Context context, ScriptableObject scope, String... optional) throws Exception {
-        context.evaluateString(scope, read("vue.kui.js"), "vue.kui.js", 1, null);
-        for (String name : optional) {
-            context.evaluateString(scope, read(name), name, 1, null);
-        }
-    }
-
-    private static ScriptableObject browserScope(Context context, Document document) throws Exception {
-        ScriptableObject scope = context.initStandardObjects();
-        KuiServices.setScript(new RhinoTestScriptService(context, scope));
-        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document));
-        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window));
-        String bootstrap = Loader.readGlobalJS()
-                .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
-                        "let document = __auiTestDocument;")
-                .replace("let window = KltytonUI.getWindow();", "let window = __auiTestWindow;");
-        context.evaluateString(scope, bootstrap, "global.js", 1, null);
-        return scope;
+    private void load(String... optional) throws Exception {
+        page.eval(read("vue.kui.js"), "vue.kui.js");
+        for (String name : optional) page.eval(read(name), name);
     }
 
     private static String read(String name) throws Exception {
@@ -400,28 +352,4 @@ class McUiComponentCompatibilityTest {
         }
     }
 
-    private record RhinoTestScriptService(Context context, Scriptable scope) implements KuiScriptService {
-        @Override
-        public void eval(String code, Event event, String source) {
-        }
-
-        @Override
-        public void reload() {
-        }
-
-        @Override
-        public Consumer<Object> createCallback(Object callback) {
-            if (!(callback instanceof Callable callable)) return null;
-            EcmaEventListener listener = new EcmaEventListener(callable, scope, context);
-            return value -> RhinoTestSupport.callInContext(context, (cx, owner, receiver, arguments) -> {
-                listener.accept(value);
-                return null;
-            }, scope, scope, new Object[0]);
-        }
-
-        @Override
-        public Object wrapHostObject(Object value) {
-            return RhinoTestSupport.wrap(context, scope, value);
-        }
-    }
 }

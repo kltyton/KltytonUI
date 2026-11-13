@@ -40,6 +40,7 @@ public final class KuiServices {
     private static volatile KuiScriptService script = Defaults.SCRIPT;
     private static volatile KuiRenderService render = Defaults.RENDER;
     private static volatile KuiItemRenderService items = Defaults.ITEMS;
+    private static volatile KuiModelRenderService models = source -> null;
     private static volatile KuiAudioService audio = Defaults.AUDIO;
     private static volatile KuiWebViewService webView = Defaults.WEBVIEW;
     private static volatile boolean bootstrapped;
@@ -85,6 +86,15 @@ public final class KuiServices {
 
     public static void setAudio(KuiAudioService implementation) {
         audio = implementation == null ? Defaults.AUDIO : implementation;
+    }
+
+    public static void setModels(KuiModelRenderService implementation) {
+        models = implementation == null ? source -> null : implementation;
+    }
+
+    public static KuiModelRenderService models() {
+        bootstrap();
+        return models;
     }
 
     public static void setWebView(KuiWebViewService implementation) {
@@ -313,8 +323,16 @@ public final class KuiServices {
             }
         };
 
-        static final DocumentExpander EXPANDER = document -> {
-            // No loader implementation available; pure expansion is loader-side.
+        static final DocumentExpander EXPANDER = new DocumentExpander() {
+            @Override
+            public void apply(io.github.kltyton.kltytonui.init.Document document) {
+            }
+
+            @Override
+            public boolean supportsInnerHtmlBatch(io.github.kltyton.kltytonui.init.Document document,
+                                                  io.github.kltyton.kltytonui.init.Node parent) {
+                return true;
+            }
         };
 
         static final KuiConfigService CONFIG = new KuiConfigService() {

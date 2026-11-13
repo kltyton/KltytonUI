@@ -62,7 +62,6 @@ tasks.named('compileJava').configure { dependsOn 'prepareCommonSources' }
 repositories {
     mavenCentral()
     maven { url = 'https://www.cursemaven.com' }
-    maven { url = 'https://maven.latvian.dev/releases' }
 }
 
 dependencies {
@@ -71,9 +70,6 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
 
-    // Required pure-Java page runtime; KubeJS remains optional.
-    modImplementation "dev.latvian.mods:rhino:${rhino_fabric_version}"
-
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
@@ -81,10 +77,6 @@ dependencies {
 
 tasks.named('processResources', ProcessResources).configure {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    // The shared resource is consumed by the NeoForge KubeJS plugin. Fabric's
-    // script service is intentionally optional/no-op, so do not advertise a
-    // plugin class that is not present in this loader target.
-    exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: fabric_minecraft_version,
             fabric_loader_version: fabric_loader_version,
@@ -116,4 +108,5 @@ tasks.named('test', Test).configure {
     useJUnitPlatform()
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

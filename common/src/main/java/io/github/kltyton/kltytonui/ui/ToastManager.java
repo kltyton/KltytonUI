@@ -1,10 +1,14 @@
 package io.github.kltyton.kltytonui.ui;
 
+import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.render.Drawer;
 import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.parser.HTML;
 import io.github.kltyton.kltytonui.task.FrameTaskScheduler;
 
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -15,6 +19,7 @@ public final class ToastManager {
     private static final long EXIT_DURATION_NS = 180_000_000L;
     private static final AtomicLong SEQ = new AtomicLong(1);
     private static final Map<String, ToastRef> ACTIVE = new ConcurrentHashMap<>();
+    private static final Map<String, PendingToast> PENDING = new LinkedHashMap<>();
 
     private static final String ITEM_BASE_STYLE =
             "pointer-events:auto;display:flex;align-items:flex-start;gap:10px;width:100%;" +
@@ -57,10 +62,22 @@ public final class ToastManager {
     private static String show(String message, String translationKey, ToastOptions options) {
         String content = (message == null || message.isBlank()) ? " " : message.trim();
         ToastOptions safe = options == null ? ToastOptions.defaults() : options.normalize();
+        if (HTML.getTemple(DOC_PATH) == null && Document.get(DOC_PATH).isEmpty()) {
+            String id = "toast-" + SEQ.getAndIncrement();
+            synchronized (PENDING) {
+                PENDING.put(id, new PendingToast(content, translationKey, safe));
+            }
+            KltytonUI.LOGGER.warn("[KUI Toast] template unavailable; queued until resource scan id={}", id);
+            return id;
+        }
         Overlay overlay = ensureOverlay();
         if (overlay == null || overlay.list() == null) return "";
 
         String id = "toast-" + SEQ.getAndIncrement();
+        return showOnOverlay(overlay, id, content, translationKey, safe);
+    }
+
+    private static String showOnOverlay(Overlay overlay, String id, String content, String translationKey, ToastOptions safe) {
         Element item = Element.init(overlay.document().createElement("div"));
         item.setAttribute("id", id);
         item.setClassName("kui-toast");
@@ -103,6 +120,21 @@ public final class ToastManager {
 
     /** Runs on the client tick, so startup and reload do not depend on a background timer. */
     public static void tick() {
+        synchronized (PENDING) {
+            if (!PENDING.isEmpty() && HTML.getTemple(DOC_PATH) != null) {
+                Overlay overlay = ensureOverlay();
+                if (overlay != null && overlay.list() != null) {
+                    Iterator<Map.Entry<String, PendingToast>> iterator = PENDING.entrySet().iterator();
+                    while (iterator.hasNext()) {
+                        Map.Entry<String, PendingToast> entry = iterator.next();
+                        PendingToast pending = entry.getValue();
+                        if (!showOnOverlay(overlay, entry.getKey(), pending.content(), pending.translationKey(), pending.options()).isEmpty()) {
+                            iterator.remove();
+                        }
+                    }
+                }
+            }
+        }
         if (ACTIVE.isEmpty()) return;
         long now = System.nanoTime();
         for (Map.Entry<String, ToastRef> entry : ACTIVE.entrySet()) {
@@ -117,12 +149,18 @@ public final class ToastManager {
 
     public static void dismiss(String id) {
         if (id == null || id.isBlank()) return;
+        synchronized (PENDING) {
+            if (PENDING.remove(id) != null) return;
+        }
         ToastRef ref = ACTIVE.get(id);
         if (ref == null) return;
         beginDismiss(ref, System.nanoTime());
     }
 
     public static void clear() {
+        synchronized (PENDING) {
+            PENDING.clear();
+        }
         for (Map.Entry<String, ToastRef> entry : ACTIVE.entrySet()) {
             remove(entry.getKey(), entry.getValue());
         }
@@ -212,6 +250,9 @@ public final class ToastManager {
     }
 
     private record Overlay(Document document, Element list) {
+    }
+
+    private record PendingToast(String content, String translationKey, ToastOptions options) {
     }
 
     private static final class ToastRef {

@@ -2,6 +2,7 @@ package io.github.kltyton.kltytonui.style;
 
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Size;
+import io.github.kltyton.kltytonui.layout.CssLength;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.style.Style;
@@ -11,15 +12,21 @@ import io.github.kltyton.kltytonui.render.Drawer;
 import java.util.*;
 import io.github.kltyton.kltytonui.parser.Color;
 import io.github.kltyton.kltytonui.parser.CSS;
+import java.util.regex.Pattern;
 
 public record Transition(String name, double start, double end, double duration, double delay, long startTime,
-                         String timing, String startTransform, String endTransform) {
+                         String timing, String startTransform, String endTransform, String gridStart, String gridEnd) {
     private static final Object LOCK = new Object();
     private static final Map<UUID, List<Transition>> workList = new HashMap<>();
 
     public Transition(String name, double start, double end, double duration, double delay, long startTime,
                       String timing) {
-        this(name, start, end, duration, delay, startTime, timing, null, null);
+        this(name, start, end, duration, delay, startTime, timing, null, null, null, null);
+    }
+
+    public Transition(String name, double start, double end, double duration, double delay, long startTime,
+                      String timing, String startTransform, String endTransform) {
+        this(name, start, end, duration, delay, startTime, timing, startTransform, endTransform, null, null);
     }
 
     public Transition(String name, double start, double end, double duration, double delay, long startTime) {
@@ -107,7 +114,9 @@ public record Transition(String name, double start, double end, double duration,
             if (existing != null && Objects.equals(startStyle.transition, endStyle.transition)) {
                 for (Transition active : existing) {
                     boolean unchangedTarget;
-                    if (active.endTransform != null) {
+                    if (active.gridEnd != null) {
+                        unchangedTarget = Objects.equals(active.gridEnd, endStyle.get(active.name));
+                    } else if (active.endTransform != null) {
                         unchangedTarget = Objects.equals(active.endTransform, endStyle.transform);
                     } else {
                         Double target = parseInterpolableStyle(element, active.name, endStyle.get(active.name));
@@ -216,6 +225,7 @@ public record Transition(String name, double start, double end, double duration,
             if (Math.abs(old.delay - transition.delay) > 0.0001) return false;
             if (!Objects.equals(old.timing, transition.timing)) return false;
             if (!Objects.equals(old.endTransform, transition.endTransform)) return false;
+            if (!Objects.equals(old.gridEnd, transition.gridEnd)) return false;
         }
         return true;
     }
@@ -244,6 +254,7 @@ public record Transition(String name, double start, double end, double duration,
 
         long now = Window.window.animationTimeMillis();
         ChangeBuffer changes = CHANGE_BUFFER.get();
+        Map<String, String> gridChanges = new LinkedHashMap<>();
         changes.clear();
         try {
             boolean stillActive;
@@ -255,11 +266,16 @@ public record Transition(String name, double start, double end, double duration,
                     Transition t = it.next();
                     if (t.startTime < 0) {
                         t = new Transition(t.name, t.start, t.end, t.duration, t.delay, now, t.timing,
-                                t.startTransform, t.endTransform);
+                                t.startTransform, t.endTransform, t.gridStart, t.gridEnd);
                         it.set(t);
                     }
+                    if (t.gridStart != null && now < t.startTime + t.delay) {
+                        gridChanges.put(t.name, t.gridStart);
+                        continue;
+                    }
                     if (t.duration <= 0.0) {
-                        if (t.endTransform != null) originStyle.transform = t.endTransform;
+                        if (t.gridStart != null && t.gridEnd != null) gridChanges.put(t.name, t.gridEnd);
+                        else if (t.endTransform != null) originStyle.transform = t.endTransform;
                         else addChange(changes, t.name, t.end);
                         it.remove();
                         continue;
@@ -271,13 +287,15 @@ public record Transition(String name, double start, double end, double duration,
                     }
                     if (progress > 1) progress = 1;
 
-                    if (t.endTransform != null) {
+                    double fraction = Animation.applyTiming(progress, t.timing);
+                    if (t.gridStart != null && t.gridEnd != null) {
+                        gridChanges.put(t.name, interpolateGridTracks(t.gridStart, t.gridEnd, fraction));
+                    } else if (t.endTransform != null) {
                         originStyle.transform = progress >= 1 ? t.endTransform
                                 : Transform.interpolateTransformCss(t.startTransform, t.endTransform,
-                                        getOffset(t.name, t.start, t.end, Animation.applyTiming(progress, t.timing)));
+                                        getOffset(t.name, t.start, t.end, fraction));
                     } else {
-                        addChange(changes, t.name, getOffset(t.name, t.start, t.end,
-                                Animation.applyTiming(progress, t.timing)));
+                        addChange(changes, t.name, getOffset(t.name, t.start, t.end, fraction));
                     }
                     if (progress >= 1) it.remove();
                 }
@@ -292,6 +310,9 @@ public record Transition(String name, double start, double end, double duration,
 
             if (!changes.isEmpty()) {
                 applyChanges(originStyle, changes);
+            }
+            for (Map.Entry<String, String> change : gridChanges.entrySet()) {
+                originStyle.update(change.getKey(), change.getValue());
             }
 
             return stillActive;
@@ -350,7 +371,9 @@ public record Transition(String name, double start, double end, double duration,
         return name.equals("width") || name.equals("height")
                 || name.equals("top") || name.equals("right") || name.equals("bottom") || name.equals("left")
                 || name.startsWith("margin-") || name.startsWith("padding-")
-                || (name.startsWith("border-") && name.endsWith("-width"));
+                || (name.startsWith("border-") && name.endsWith("-width"))
+                || name.equals("gap") || name.equals("row-gap") || name.equals("column-gap")
+                || name.equals("grid-template-columns") || name.equals("grid-template-rows");
     }
 
     private static boolean isRectProperty(String name) {
@@ -512,10 +535,38 @@ public record Transition(String name, double start, double end, double duration,
         return startStyle.transition == null ? "none" : startStyle.transition;
     }
 
+    private record TransitionSpec(String property, double duration, double delay, String timing) { }
+
+    private static final ThreadLocal<Map<String, List<TransitionSpec>>> SPEC_CACHE = ThreadLocal.withInitial(
+            () -> new LinkedHashMap<>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, List<TransitionSpec>> eldest) {
+                    return size() > 256;
+                }
+            });
+
     private static List<Transition> parseTransitions(Element element, Style startStyle, Style endStyle, String raw) {
         List<Transition> result = new ArrayList<>();
-        if (raw == null || raw.isBlank()) return result;
+        for (TransitionSpec spec : transitionSpecs(raw)) {
+            if ("all".equals(spec.property)) {
+                ANIMATABLE.forEach(name -> build(element, startStyle, endStyle, result, name,
+                        spec.duration, spec.delay, spec.timing));
+            } else {
+                build(element, startStyle, endStyle, result, spec.property,
+                        spec.duration, spec.delay, spec.timing);
+            }
+        }
+        return result;
+    }
 
+    private static List<TransitionSpec> transitionSpecs(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        if (raw.length() > 4096) return parseTransitionSpecs(raw);
+        return SPEC_CACHE.get().computeIfAbsent(raw, Transition::parseTransitionSpecs);
+    }
+
+    private static List<TransitionSpec> parseTransitionSpecs(String raw) {
+        List<TransitionSpec> result = new ArrayList<>();
         for (String part : splitTransitionParts(raw)) {
             String prop = "all";
             String timing = "ease";
@@ -544,14 +595,9 @@ public record Transition(String name, double start, double end, double duration,
                 }
             }
             if (invalid || "none".equals(prop)) continue;
-            if ("all".equals(prop)) {
-                double finalDur = dur;
-                double finalDel = del;
-                String finalTiming = timing;
-                ANIMATABLE.forEach(name -> build(element, startStyle, endStyle, result, name, finalDur, finalDel, finalTiming));
-            } else build(element, startStyle, endStyle, result, prop, dur, del, timing);
+            result.add(new TransitionSpec(prop, dur, del, timing));
         }
-        return result;
+        return List.copyOf(result);
     }
 
     private static List<Transition> deferStartTimes(List<Transition> transitions) {
@@ -567,7 +613,9 @@ public record Transition(String name, double start, double end, double duration,
                     -1L,
                     transition.timing,
                     transition.startTransform,
-                    transition.endTransform
+                    transition.endTransform,
+                    transition.gridStart,
+                    transition.gridEnd
             ));
         }
         return result;
@@ -575,13 +623,27 @@ public record Transition(String name, double start, double end, double duration,
 
     private static void build(Element element, Style sS, Style eS, List<Transition> res, String name, double dur,
                               double del, String timing) {
-        // Do not coerce unsupported properties into pixel values.  For example,
-        // grid-template-rows: 0fr -> 1fr used to become 0px -> 1px here, so a
-        // dynamically expanded grid stayed collapsed even though its CSS class
-        // had changed.  Unsupported transition properties must retain the raw
-        // target style; they simply do not animate until the renderer supports
-        // their value type.
+        name = name.toLowerCase(Locale.ROOT);
+        if (name.equals("border-color") || name.equals("border-width")) {
+            String suffix = name.substring("border".length());
+            for (String side : List.of("top", "right", "bottom", "left")) {
+                build(element, sS, eS, res, "border-" + side + suffix, dur, del, timing);
+            }
+            return;
+        }
+        if (name.equals("gap")) {
+            build(element, sS, eS, res, "row-gap", dur, del, timing);
+            build(element, sS, eS, res, "column-gap", dur, del, timing);
+            return;
+        }
         if (!isAnimatable(name)) return;
+        boolean borderComponent = name.startsWith("border-") && (name.endsWith("-color") || name.endsWith("-width"));
+        if (!borderComponent && Objects.equals(sS.get(name), eS.get(name))) return;
+        if (isGridTrackProperty(name) || name.equals("row-gap") || name.equals("column-gap")) {
+            Transition grid = gridTrackTransition(sS.get(name), eS.get(name), name, dur, del, timing);
+            if (grid != null) res.add(grid);
+            return;
+        }
         int first = res.size();
         if (name.equals("transform")) {
             if (!Objects.equals(sS.transform, eS.transform)) {
@@ -601,7 +663,8 @@ public record Transition(String name, double start, double end, double duration,
         for (int i = first; i < res.size(); i++) {
             Transition transition = res.get(i);
             res.set(i, new Transition(transition.name, transition.start, transition.end, transition.duration,
-                    transition.delay, transition.startTime, timing, transition.startTransform, transition.endTransform));
+                    transition.delay, transition.startTime, timing, transition.startTransform, transition.endTransform,
+                    transition.gridStart, transition.gridEnd));
         }
     }
 
@@ -662,6 +725,15 @@ public record Transition(String name, double start, double end, double duration,
             Transition active = activeByName.get(replacement.name);
             if (active == null) continue;
 
+            if (active.gridStart != null && replacement.gridStart != null) {
+                double progress = Animation.applyTiming(transitionProgress(active, now), active.timing);
+                String current = interpolateGridTracks(active.gridStart, active.gridEnd, progress);
+                double duration = replacement.duration;
+                if (isReversing(active, replacement.gridEnd)) duration *= Math.max(0, Math.min(1, Math.abs(progress)));
+                it.set(new Transition(replacement.name, 0, 1, duration, replacement.delay,
+                        replacement.startTime, replacement.timing, null, null, current, replacement.gridEnd));
+                continue;
+            }
             double current = currentValue(active, now);
             double duration = replacement.duration;
             if (replacement.endTransform != null && active.endTransform != null) {
@@ -689,6 +761,16 @@ public record Transition(String name, double start, double end, double duration,
         return Math.abs(newEnd - active.start) <= 0.0001;
     }
 
+    private static boolean isReversing(Transition active, String newEnd) {
+        return active.gridEnd != null && Objects.equals(active.gridStart, newEnd);
+    }
+
+    private static double transitionProgress(Transition transition, long now) {
+        if (transition.startTime < 0 || now <= transition.startTime + transition.delay) return 0;
+        if (transition.duration <= 0) return 1;
+        return Math.max(0, Math.min(1, (now - transition.startTime - transition.delay) / transition.duration));
+    }
+
     private static double currentValue(Transition transition, long now) {
         if (transition.startTime < 0 || now <= transition.startTime + transition.delay) return transition.start;
         if (transition.duration <= 0.0) return transition.end;
@@ -705,7 +787,8 @@ public record Transition(String name, double start, double end, double duration,
             "margin-top", "margin-right", "margin-bottom", "margin-left",
             "padding-top", "padding-right", "padding-bottom", "padding-left",
             "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
-            "border-radius", "box-shadow"
+            "border-radius", "box-shadow", "row-gap", "column-gap",
+            "grid-template-columns", "grid-template-rows"
     );
 
     private static boolean isAnimatable(String name) {
@@ -713,6 +796,78 @@ public record Transition(String name, double start, double end, double duration,
                 || "filter".equals(name)
                 || Box.matchStyleName(name)
                 || ANIMATABLE.contains(name);
+    }
+
+    private static boolean isGridTrackProperty(String name) {
+        return "grid-template-columns".equals(name) || "grid-template-rows".equals(name);
+    }
+
+    private static Transition gridTrackTransition(String start, String end, String name,
+                                                  double duration, double delay, String timing) {
+        if (Objects.equals(start, end)) return null;
+        List<GridTrackValue> s = parseGridTracks(start), e = parseGridTracks(end);
+        if (s == null || e == null || s.size() != e.size()) return null;
+        for (int i = 0; i < s.size(); i++) if (s.get(i).fraction != e.get(i).fraction) return null;
+        String from = serializeGridTracks(s), to = serializeGridTracks(e);
+        if (from.equals(to)) return null;
+        return new Transition(name, 0, 1, duration, delay, Window.window.animationTimeMillis(), timing,
+                null, null, from, to);
+    }
+
+    private static List<GridTrackValue> parseGridTracks(String raw) {
+        if (raw == null || raw.isBlank() || raw.contains("[") || raw.contains("]")) return null;
+        List<String> tokens = splitTransitionTokens(raw);
+        if (tokens.isEmpty()) return null;
+        ArrayList<GridTrackValue> values = new ArrayList<>(tokens.size());
+        for (String token : tokens) {
+            GridTrackValue value = parseGridValue(token);
+            if (value == null) return null;
+            values.add(value);
+        }
+        return values;
+    }
+
+    private static String interpolateGridTracks(String start, String end, double progress) {
+        List<GridTrackValue> s = parseGridTracks(start), e = parseGridTracks(end);
+        ArrayList<GridTrackValue> result = new ArrayList<>(s.size());
+        for (int i = 0; i < s.size(); i++) {
+            GridTrackValue sv = s.get(i), ev = e.get(i);
+            result.add(new GridTrackValue(sv.pixels + (ev.pixels - sv.pixels) * progress,
+                    sv.percent + (ev.percent - sv.percent) * progress, sv.fraction));
+        }
+        return serializeGridTracks(result);
+    }
+
+    private static String serializeGridTracks(List<GridTrackValue> values) {
+        StringJoiner result = new StringJoiner(" ");
+        for (GridTrackValue value : values) result.add(value.css());
+        return result.toString();
+    }
+
+    private static final Pattern GRID_FRACTION = Pattern.compile(
+            "[+]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(e[+-]?[0-9]+)?fr");
+
+    private static GridTrackValue parseGridValue(String token) {
+        String lower = token.toLowerCase(Locale.ROOT);
+        if (GRID_FRACTION.matcher(lower).matches()) {
+            double value = Double.parseDouble(lower.substring(0, lower.length() - 2));
+            return Double.isFinite(value) ? new GridTrackValue(value, 0, true) : null;
+        }
+        if (lower.contains("(") && !lower.startsWith("calc(")) return null;
+        CssLength length = CssLength.parse(token);
+        Double zero = length.resolve(0), hundred = length.resolve(100);
+        if (zero == null || hundred == null || !Double.isFinite(zero) || !Double.isFinite(hundred)) return null;
+        return new GridTrackValue(zero, hundred - zero, false);
+    }
+
+    private record GridTrackValue(double pixels, double percent, boolean fraction) {
+        String css() {
+            if (fraction) return String.format(Locale.ROOT, "%.6ffr", Math.max(0, pixels));
+            if (percent == 0) return String.format(Locale.ROOT, "%.6fpx", Math.max(0, pixels));
+            if (pixels == 0) return String.format(Locale.ROOT, "%.6f%%", Math.max(0, percent));
+            return String.format(Locale.ROOT, "calc(%.6fpx %s %.6f%%)", pixels,
+                    percent < 0 ? "-" : "+", Math.abs(percent));
+        }
     }
 
     private static Double parseInterpolableStyle(Element element, String name, String value) {
@@ -727,7 +882,8 @@ public record Transition(String name, double start, double end, double duration,
         }
         // CSS-wide keywords and intrinsic sizing keywords such as auto are
         // discrete values. Browsers do not coerce them to 0px for transitions.
-        return Size.tryResolveLength(value, transitionPercentBasis(element, name));
+        io.github.kltyton.kltytonui.layout.CssLength length = io.github.kltyton.kltytonui.layout.CssLength.parse(value);
+        return length.resolve(length.dependsOnPercentage() ? transitionPercentBasis(element, name) : 0);
     }
 
 }

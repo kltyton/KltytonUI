@@ -488,9 +488,7 @@
 .mcui-theme .input-group .form-input { min-width: 0; flex: 1; }
 .mcui-theme .input-group .button { min-width: 96px; }
 .mcui-theme .table-wrap { width: 100%; overflow: auto; border: 3px solid var(--edge); }
-.mcui-theme .table { width: 100%; border-collapse: collapse; color: var(--ink); background: #3b3c3e; }
-.mcui-theme .table thead, .mcui-theme .table tbody { display: block; }
-.mcui-theme .table tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mcui-theme .table { width: 100%; border-spacing:0; color: var(--ink); background: #3b3c3e; }
 .mcui-theme .table th,
 .mcui-theme .table td {
   padding: 10px 12px;
@@ -724,7 +722,6 @@
   flex-direction: column;
 }
 .mcui-theme.mcui-showcase > .showcase-main > .breadcrumb { flex: 0 0 auto; }
-.mcui-theme.mcui-showcase .table-wrap,
 .mcui-theme.mcui-showcase .mcui-code,
 .mcui-theme.mcui-showcase .navbar-nav {
   overflow: visible;

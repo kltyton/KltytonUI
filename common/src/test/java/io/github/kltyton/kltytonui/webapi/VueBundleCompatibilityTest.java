@@ -1,69 +1,64 @@
 package io.github.kltyton.kltytonui.webapi;
 
-import io.github.kltyton.kltytonui.init.Window;
 import io.github.kltyton.kltytonui.init.Document;
-import io.github.kltyton.kltytonui.loader.Loader;
-import dev.latvian.mods.rhino.Context;
-import dev.latvian.mods.rhino.ScriptableObject;
+import io.github.kltyton.kltytonui.script.neon.NeonPageRuntime;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Execution(ExecutionMode.SAME_THREAD)
 class VueBundleCompatibilityTest {
-    private static final String ECMASCRIPT = "assets/kltytonui/kltytonui/ecmascript.js";
     private static final String ROOT = "assets/kltytonui/kltytonui/kltytonui/runtime/";
     private static final String COMPONENT_RUNTIME =
             "assets/kltytonui/kltytonui/kltytonui/runtime/mcui/";
 
+    private Page page;
+
+    @BeforeEach
+    void createPage() {
+        page = new Page();
+    }
+
+    @AfterEach
+    void closePage() {
+        page.close();
+    }
+
     @Test
     void pinnedProductionBundlesCompileOnTheKuiScriptEngine() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        String vue = readRuntime("vue.kui.js");
-        String mcui = readRuntime("mcui-oreui.kui.js");
-        assertNotNull(context.compileString(vue, "vue.kui.js", 1, null));
-        assertNotNull(context.compileString(mcui, "mcui-oreui.kui.js", 1, null));
-
-        ScriptableObject scope = initializedScope(context);
-        context.evaluateString(scope, vue, "vue.kui.js", 1, null);
-        assertNotEquals(dev.latvian.mods.rhino.Scriptable.NOT_FOUND,
-                RhinoTestSupport.getProperty(context, scope, "Vue"));
-        context.evaluateString(scope, mcui, "mcui-oreui.kui.js", 1, null);
-        assertNotEquals(dev.latvian.mods.rhino.Scriptable.NOT_FOUND,
-                RhinoTestSupport.getProperty(context, scope, "McUIVue"));
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
+        page.eval(readRuntime("mcui-oreui.kui.js"), "mcui-oreui.kui.js");
+        assertEquals("object|object", page.result("return typeof Vue + '|' + typeof McUIVue;", "bundle-globals"));
     }
 
     @Test
     void vueReactivityUsesTheGenericProxyAndReflectContract() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = initializedScope(context);
-        context.evaluateString(scope, readRuntime("vue.kui.js"), "vue.kui.js", 1, null);
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
 
-        Object result = context.evaluateString(scope,
+        Object result = page.result(
                 "var state = Vue.reactive({ count: 1 });"
                         + "var values = [];"
                         + "Vue.effect(function() { values.push(state.count); });"
                         + "state.count = 2;"
-                        + "values.join(',') + '|' + Vue.isReactive(state);",
-                "vue-reactivity", 1, null);
+                        + "return values.join(',') + '|' + Vue.isReactive(state);",
+                "vue-reactivity");
 
         assertEquals("1,2|true", result);
     }
 
     @Test
     void vueArrayMutationsUseStringProxyKeysAndTriggerLengthDependencies() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = initializedScope(context);
-        context.evaluateString(scope, readRuntime("vue.kui.js"), "vue.kui.js", 1, null);
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
 
-        Object result = context.evaluateString(scope,
+        Object result = page.result(
                 "var target=[];var keys=[];"
                         + "var probe=new Proxy(target,{"
                         + "get:function(t,k,r){return Reflect.get(t,k,r);},"
@@ -78,38 +73,34 @@ class VueBundleCompatibilityTest {
                         + "var items=Vue.ref([]);var lengths=[];"
                         + "Vue.effect(function(){lengths.push(items.value.length);});"
                         + "items.value.unshift('a');items.value.push('b');items.value.splice(0,1);"
-                        + "keys.join(',')+'|'+lengths.join(',')+'|'"
+                        + "return keys.join(',')+'|'+lengths.join(',')+'|'"
                         + "+String(spliceTarget.length)+':'+spliceTarget.join(',');",
-                "vue-array-proxy-keys", 1, null);
+                "vue-array-proxy-keys");
 
         assertEquals("string:0,string:length|0,1,2,1|1:b", result);
     }
 
     @Test
     void arrayIsArrayRecognizesReactiveAndNestedProxyArraysOnly() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = initializedScope(context);
-        context.evaluateString(scope, readRuntime("vue.kui.js"), "vue.kui.js", 1, null);
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
 
-        Object result = context.evaluateString(scope, """
+        Object result = page.result( """
                 var array = ['survival'];
                 var reactive = Vue.ref(array).value;
                 var nested = new Proxy(reactive, {});
                 var objectProxy = new Proxy({}, {});
                 var fake = Object.create(Array.prototype);
-                [Array.isArray(array), Array.isArray(reactive), Array.isArray(nested),
+                return [Array.isArray(array), Array.isArray(reactive), Array.isArray(nested),
                  Array.isArray(objectProxy), Array.isArray(fake), reactive.includes('survival')].join('|');
-                """, "proxy-array-isarray", 1, null);
+                """, "proxy-array-isarray");
 
         assertEquals("true|true|true|false|false|true", result);
     }
 
     @Test
     void proxySupportsTheReflectTrapsUsedByVue() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = initializedScope(context);
 
-        Object result = context.evaluateString(scope,
+        Object result = page.result(
                 "var target = { a: 1 };"
                         + "var proxy = new Proxy(target, {"
                         + " get: function(t, k, r) { return Reflect.get(t, k, r); },"
@@ -123,76 +114,30 @@ class VueBundleCompatibilityTest {
                         + "var has = ('b' in proxy); var keys = Object.keys(proxy).sort().join(',');"
                         + "Object.defineProperty(proxy, 'c', { value: 4, enumerable: true, configurable: true });"
                         + "delete proxy.a;"
-                        + "read + '|' + target.b + '|' + has + '|' + keys + '|' + target.c + '|' + ('a' in target);",
-                "proxy-reflect", 1, null);
+                        + "return read + '|' + target.b + '|' + has + '|' + keys + '|' + target.c + '|' + ('a' in target);",
+                "proxy-reflect");
 
         assertEquals("1|3|true|a,b|4|false", result);
     }
 
     @Test
     void promiseCallbacksUseAnAsynchronousFifoMicrotaskQueue() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = context.initStandardObjects();
-        context.evaluateString(scope,
-                "var jobs = []; var window = { queueMicrotask: function(callback) { jobs.push(callback); } };",
-                "microtask-host", 1, null);
-        context.evaluateString(scope, read(ECMASCRIPT), "ecmascript.js", 1, null);
-
-        Object result = context.evaluateString(scope,
-                "var order = [];"
-                        + "Promise.resolve(1).then(function(v) { order.push('p' + v); return v + 1; })"
-                        + ".then(function(v) { order.push('p' + v); });"
-                        + "queueMicrotask(function() { order.push('q'); });"
-                        + "order.push('sync');"
-                        + "while (jobs.length) jobs.shift()();"
-                        + "order.join(',');",
-                "promise-order", 1, null);
-
-        assertEquals("sync,p1,q,p2", result);
+        page.eval("var order=[]; Promise.resolve(1).then(function(v){order.push('p'+v);return v+1;})"
+                + ".then(function(v){order.push('p'+v);document.body.setAttribute('data-order',order.join(','));});"
+                + "queueMicrotask(function(){order.push('q');}); order.push('sync');", "promise-order");
+        assertEquals("sync,p1,q,p2", page.awaitAttribute("data-order", 2000));
     }
 
     @Test
     void vueMountsAndUpdatesAgainstTheGenericKuiDom() throws Exception {
-        Document document = TestDocumentFactory.createDocument();
-        CountDownLatch updated = new CountDownLatch(1);
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = context.initStandardObjects();
-        RhinoTestSupport.putProperty(context, scope, "__auiTestDocument",
-                RhinoTestSupport.wrap(context, scope, document));
-        RhinoTestSupport.putProperty(context, scope, "__auiTestWindow",
-                RhinoTestSupport.wrap(context, scope, Window.window));
-        RhinoTestSupport.putProperty(context, scope, "__auiUpdated",
-                RhinoTestSupport.wrap(context, scope, updated));
-        String bootstrap = Loader.readGlobalJS()
-                .replace("let document = KltytonUI.getDocumentByUUID(\"__KUI_DOCUMENT_UUID__\");",
-                        "let document = __auiTestDocument;")
-                .replace("let window = KltytonUI.getWindow();", "let window = __auiTestWindow;");
-
-        try (Document.ContextScope ignored = Document.withContext(document)) {
-            context.evaluateString(scope, bootstrap, "global.js", 1, null);
-            context.evaluateString(scope, readRuntime("vue.kui.js"), "vue.kui.js", 1, null);
-            context.evaluateString(scope, "var root = document.createElement('div');", "dom-root", 1, null);
-            context.evaluateString(scope,
-                    "document.body.appendChild(root);"
-                            + "var value = Vue.ref('initial');"
-                            + "var app = Vue.createApp({ render: function() { return Vue.h('span', { id: 'vue-probe' }, value.value); } });"
-                            + "app.mount(root); value.value = 'updated';"
-                            + "Vue.nextTick(function() { __auiUpdated.countDown(); });",
-                    "vue-mount", 1, null);
-        }
-
-        assertTrue(updated.await(2, TimeUnit.SECONDS));
-        assertEquals("updated", document.querySelector("#vue-probe").getTextContent());
-    }
-
-    private static ScriptableObject initializedScope(Context context) throws Exception {
-        ScriptableObject scope = context.initStandardObjects();
-        RhinoTestSupport.putProperty(context, scope, "window", RhinoTestSupport.wrap(context, scope, Window.window));
-        context.evaluateString(scope, read(ECMASCRIPT), "ecmascript.js", 1, null);
-        assertEquals("function|object|function|function", context.evaluateString(scope,
-                "typeof Proxy + '|' + typeof Reflect + '|' + typeof Promise + '|' + typeof queueMicrotask",
-                "ecmascript-types", 1, null));
-        return scope;
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
+        page.eval("var root=document.createElement('div'); document.body.appendChild(root);"
+                + "var value=Vue.ref('initial');"
+                + "var app=Vue.createApp({render:function(){return Vue.h('span',{id:'vue-probe'},value.value);}});"
+                + "app.mount(root); value.value='updated';"
+                + "Vue.nextTick(function(){document.body.setAttribute('data-updated','yes');});", "vue-mount");
+        assertEquals("yes", page.awaitAttribute("data-updated", 2000));
+        assertEquals("updated", page.document.querySelector("#vue-probe").getTextContent());
     }
 
     private static String read(String name) throws Exception {
@@ -208,19 +153,47 @@ class VueBundleCompatibilityTest {
 
     @Test
     void vueShallowReactiveMapValuesRemainIterable() throws Exception {
-        Context context = RhinoTestSupport.enterContext();
-        ScriptableObject scope = initializedScope(context);
-        context.evaluateString(scope, readRuntime("vue.kui.js"), "vue.kui.js", 1, null);
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
 
-        Object result = context.evaluateString(scope, """
+        Object result = page.result( """
                 var raw = new Map();
                 raw.set('top', 1);
                 function probe(fn) { try { return String(fn()); } catch (error) { return String(error); } }
                 var plain = probe(function() { return Array.from(raw.values()).length; });
                 var wrapped = Vue.shallowReactive(raw);
                 var reactive = probe(function() { return Array.from(wrapped.values()).length; });
-                plain + '|' + reactive;
-                """, "vue-map-iteration", 1, null);
+                return plain + '|' + reactive;
+                """, "vue-map-iteration");
         assertEquals("1|1", result);
     }
+    static final class Page implements AutoCloseable {
+        private final TestDocumentFactory.NeonPage owner = new TestDocumentFactory.NeonPage();
+        final Document document = owner.document();
+
+        void eval(String code, String source) {
+            try (Document.ContextScope ignored = Document.withContext(document)) {
+                NeonPageRuntime.eval(code, null, source);
+            }
+        }
+
+        String result(String body, String source) {
+            eval("document.body.setAttribute('data-test-result', String((function(){" + body + "})()));", source);
+            return document.body.getAttribute("data-test-result");
+        }
+
+        String awaitAttribute(String name, long timeoutMillis) throws InterruptedException {
+            long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+            while (System.nanoTime() < deadline) {
+                eval("void 0;", "await-attribute");
+                if (document.body.getAttribute(name) != null) break;
+                Thread.sleep(10);
+            }
+            return document.body.getAttribute(name);
+        }
+
+        @Override public void close() {
+            owner.close();
+        }
+    }
+
 }

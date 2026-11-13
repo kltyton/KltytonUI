@@ -39,6 +39,8 @@ import io.github.kltyton.kltytonui.world.WorldWindow;
 
 @EventBusSubscriber(modid = KltytonUI.MODID, value = Dist.CLIENT)
 public class Client {
+    private static final boolean DEVELOPMENT_TESTS_PRESENT = KltytonUI.class.getResource(
+            "/io/github/kltyton/kltytonui/client/ClientRuntimeSelfTest.class") != null;
     public static final HashMap<String, Integer> KEY_MAP = new HashMap<>();
     private static int lastWindowWidth = -1;
     private static int lastWindowHeight = -1;
@@ -412,7 +414,9 @@ public class Client {
 
     @SubscribeEvent
     public static void tick(ClientTickEvent.Pre event) {        CursorReleaseController.tick();
-            ClientRuntimeSelfTest.tick();
+            if (DEVELOPMENT_TESTS_PRESENT && !io.github.kltyton.kltytonui.spi.KuiServices.client().isProduction()) {
+                ClientRuntimeSelfTest.tick();
+            }
             io.github.kltyton.kltytonui.loader.ClientLoaderForge.tickTemplateScanRetry();
             if (KltytonUIConfig.consumeClientReloadPending()) {
                 io.github.kltyton.kltytonui.dev.debug.ExternalDebugServer.reconcileConfiguration();
@@ -573,18 +577,21 @@ public class Client {
         if (text.isOblique()) renderText = renderText.withStyle(ChatFormatting.ITALIC);
         if (text.isUnderlined()) renderText = renderText.withStyle(ChatFormatting.UNDERLINE);
         if (text.isStrikethrough()) renderText = renderText.withStyle(ChatFormatting.STRIKETHROUGH);
-        int stroke = Math.max(0, (int) Math.ceil(text.strokeWidth));
-        if (stroke > 0) {
-            int strokeColor = text.strokeColor.getValue();
-            for (int ox = -stroke; ox <= stroke; ox++) {
-                for (int oy = -stroke; oy <= stroke; oy++) {
-                    if (ox == 0 && oy == 0) continue;
-                    if (ox * ox + oy * oy > stroke * stroke) continue;
-                    Minecraft.getInstance().font.drawInBatch(renderText.getVisualOrderText(), ox, oy, strokeColor, false, poseStack.last().pose(), Minecraft.getInstance().renderBuffers().bufferSource(), net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+        // getBuffer can flush the preceding text/image batch when its type changes.
+        try (var ignored = io.github.kltyton.kltytonui.render.OutputTargets.pushBufferTarget(Minecraft.getInstance().getMainRenderTarget())) {
+            int stroke = Math.max(0, (int) Math.ceil(text.strokeWidth));
+            if (stroke > 0) {
+                int strokeColor = text.strokeColor.getValue();
+                for (int ox = -stroke; ox <= stroke; ox++) {
+                    for (int oy = -stroke; oy <= stroke; oy++) {
+                        if (ox == 0 && oy == 0) continue;
+                        if (ox * ox + oy * oy > stroke * stroke) continue;
+                        Minecraft.getInstance().font.drawInBatch(renderText.getVisualOrderText(), ox, oy, strokeColor, false, poseStack.last().pose(), Minecraft.getInstance().renderBuffers().bufferSource(), net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                    }
                 }
             }
+            Minecraft.getInstance().font.drawInBatch(renderText.getVisualOrderText(), 0, 0, text.color.getValue(), false, poseStack.last().pose(), Minecraft.getInstance().renderBuffers().bufferSource(), net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
         }
-        Minecraft.getInstance().font.drawInBatch(renderText.getVisualOrderText(), 0, 0, text.color.getValue(), false, poseStack.last().pose(), Minecraft.getInstance().renderBuffers().bufferSource(), net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
         poseStack.popPose();
     }
 

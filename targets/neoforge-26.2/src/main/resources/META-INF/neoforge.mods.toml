@@ -27,8 +27,8 @@ ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.${mod_id}]]
-modId = "rhino"
-type = "required"
-versionRange = "[1,)"
-ordering = "BEFORE"
+modId = "geckolib"
+type = "optional"
+versionRange = "[1.0.0,)"
+ordering = "AFTER"
 side = "CLIENT"

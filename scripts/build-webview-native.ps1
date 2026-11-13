@@ -10,7 +10,7 @@ build/ tree on first use, configures CMake against it, builds, and copies the re
 to common/src/main/resources/assets/kltytonui/native/windows-x64/.
 
 .EXAMPLE
-powershell -ExecutionPolicy Bypass -File scripts/build-webview-native.ps1
+pwsh -File scripts/build-webview-native.ps1
 #>
 [CmdletBinding()]
 param(
@@ -50,7 +50,8 @@ function Get-WebView2Sdk {
         }
         Remove-Item -LiteralPath $packageDir -Recurse -Force
     }
-    Expand-Archive -Path $nupkg -DestinationPath $packageDir -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $packageDir)
 }
 
 function Get-VcVarsPath {
@@ -90,6 +91,14 @@ cmd /c "`"$vcvars`" && cmake --build `"$buildDir`" --config $Configuration"
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed." }
 
 if (-not (Test-Path $outputDll)) { throw "Expected DLL not produced: $outputDll" }
+
+# A transitive native dependency can reintroduce a dynamic CRT despite /MT.
+$imports = & cmd /c "`"$vcvars`" && dumpbin /nologo /imports `"$outputDll`"" 2>&1
+if ($LASTEXITCODE -ne 0) { throw "dumpbin import check failed: $imports" }
+$dynamicCrt = $imports | Select-String -Pattern '(?i)\b(?:msvcp\d+[^\s]*|vcruntime\d+[^\s]*|msvcr\d+[^\s]*|ucrtbased?)\.dll\b|api-ms-win-crt-[^\s]*\.dll'
+if ($dynamicCrt) {
+    throw "Native host must statically link the CRT; found dynamic imports: $dynamicCrt"
+}
 
 if (-not $SkipCopy) {
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null

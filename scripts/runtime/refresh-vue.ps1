@@ -5,7 +5,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $tempRoot = Join-Path $tempBase ('kui-vue-runtime-' + [Guid]::NewGuid().ToString('N'))
-$previousPlugin = $env:KUI_RHINO_SEMANTICS_PLUGIN
 $previousNodePath = $env:NODE_PATH
 $previousNpmCache = $env:npm_config_cache
 
@@ -16,8 +15,7 @@ try {
         'vue@3.5.34',
         '@babel/core@7.28.4',
         '@babel/cli@7.28.3',
-        '@babel/preset-env@7.28.3',
-        '@babel/types@7.28.4'
+        '@babel/preset-env@7.28.3'
     )
     & npm install --prefix $tempRoot --no-save --no-package-lock --ignore-scripts --audit=false --fund=false @packages
     if ($LASTEXITCODE -ne 0) { throw 'Pinned Vue and Babel package install failed' }
@@ -33,13 +31,10 @@ module.exports = {
     bugfixes: true,
     modules: false,
     useBuiltIns: false
-  }]],
-  plugins: [process.env.KUI_RHINO_SEMANTICS_PLUGIN]
+  }]]
 };
 '@, [Text.UTF8Encoding]::new($false))
 
-    $env:KUI_RHINO_SEMANTICS_PLUGIN = (Resolve-Path (
-        Join-Path $PSScriptRoot 'rhino-semantics.cjs')).Path
     $env:NODE_PATH = Join-Path $tempRoot 'node_modules'
     $source = Join-Path $tempRoot 'node_modules/vue/dist/vue.global.prod.js'
     $generated = Join-Path $tempRoot 'vue.kui.js'
@@ -57,7 +52,6 @@ module.exports = {
     Copy-Item -LiteralPath $generated -Destination $target -Force
     Write-Host "Refreshed $target"
 } finally {
-    $env:KUI_RHINO_SEMANTICS_PLUGIN = $previousPlugin
     $env:NODE_PATH = $previousNodePath
     $env:npm_config_cache = $previousNpmCache
     $resolved = [IO.Path]::GetFullPath($tempRoot)

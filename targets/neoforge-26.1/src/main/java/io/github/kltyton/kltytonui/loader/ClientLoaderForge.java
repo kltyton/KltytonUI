@@ -2,6 +2,7 @@ package io.github.kltyton.kltytonui.loader;
 
 import io.github.kltyton.kltytonui.KltytonUI;
 import io.github.kltyton.kltytonui.dev.debug.ExternalDebugServer;
+import io.github.kltyton.kltytonui.neoforge.ResourceService;
 import io.github.kltyton.kltytonui.parser.HTML;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
@@ -13,6 +14,7 @@ import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.List;
 
 /**
  * NeoForge client-setup hook for {@link ClientLoader}.
@@ -48,8 +50,6 @@ public final class ClientLoaderForge {
 
     @SubscribeEvent
     public static void setup(FMLClientSetupEvent event) {
-        // 初始加载时不调用 KltytonJS.reload()，因为此时其他模组的客户端资源
-        // （如模型层）可能尚未注册完毕，强制重载 KubeJS 客户端脚本会导致崩溃。
         event.enqueueWork(() -> {
             ExternalDebugServer.startIfEnabled();
             ClientLoader.reloadResources();
@@ -83,9 +83,12 @@ public final class ClientLoaderForge {
                     @Override
                     public CompletableFuture<Void> reload(SharedState sharedState, Executor backgroundExecutor,
                                                           PreparationBarrier barrier, Executor gameExecutor) {
-                        return CompletableFuture.<Void>completedFuture(null)
+                        return CompletableFuture.supplyAsync(
+                                        () -> ClientLoader.prepareThemeSnapshot(ResourceService.listThemeResourcePaths(
+                                                sharedState.resourceManager())),
+                                        backgroundExecutor)
                                 .thenCompose(barrier::wait)
-                                .thenAcceptAsync(ignored -> rescanAfterReload(), gameExecutor);
+                                .thenAcceptAsync(ClientLoaderForge::rescanAfterReload, gameExecutor);
                     }
 
                     @Override
@@ -96,14 +99,17 @@ public final class ClientLoaderForge {
         );
     }
 
-    private static void rescanAfterReload() {
+    private static void rescanAfterReload(ClientLoader.ThemeResourceSnapshot snapshot) {
         // The first invocation is the initial startup reload: documents cannot
         // exist yet, so scan quietly without the refresh pass and toast.
         if (initialPackScanPending) {
             initialPackScanPending = false;
+            ClientLoader.publishThemeSnapshot(snapshot);
             HTML.scan();
+            ClientLoader.warmUpScannedTemplates();
             return;
         }
-        ClientLoader.reloadResources();
+        io.github.kltyton.kltytonui.client.model.ModelRenderService.invalidate();
+        ClientLoader.reloadResources(snapshot);
     }
 }

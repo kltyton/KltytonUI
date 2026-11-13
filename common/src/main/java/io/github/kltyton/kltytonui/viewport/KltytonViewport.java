@@ -24,7 +24,7 @@ import io.github.kltyton.kltytonui.parser.CSS;
  * <p>Mode summary:
  * <ul>
  *     <li>{@code gui}: Minecraft GUI-scaled logical viewport.</li>
- *     <li>{@code window}/{@code native}: browser-like CSS viewport with a fixed monitor-derived
+ *     <li>{@code window}/{@code native}: browser-like CSS viewport with a fixed framebuffer-derived
  *     width. Its height follows the current window's CSS height while the render scale remains
  *     fixed, so horizontal layout does not change when the Minecraft window is resized.</li>
  *     <li>{@code browser}/{@code css}: fixed CSS width scaled to the current MC window.
@@ -109,12 +109,34 @@ public record KltytonViewport(
                                                      Map<String, String> options) {
         GLFWVidMode videoMode = resolveVideoMode(window);
         double cssScale = browserCssScale(window);
-        int physicalWidth = videoMode == null ? DEFAULT_BROWSER_WIDTH : videoMode.width();
-        int physicalHeight = videoMode == null ? DEFAULT_BROWSER_HEIGHT : videoMode.height();
+        int physicalWidth = videoMode == null ? windowPhysicalWidth(window) : videoMode.width();
+        int physicalHeight = videoMode == null ? windowPhysicalHeight(window) : videoMode.height();
         int width = Math.max(1, parseInt(options.get("width"), (int) Math.round(physicalWidth / cssScale)));
         int height = Math.max(1, parseInt(options.get("height"), (int) Math.round(physicalHeight / cssScale)));
         float renderScale = (float) Math.max(0.0001d, cssScale / actualGuiScale);
         return new KltytonViewport(width, height, renderScale, cssScale);
+    }
+
+    /** Window framebuffer width in physical pixels, or the fallback when it cannot be asked. */
+    private static int windowPhysicalWidth(Window window) {
+        if (window != null) {
+            int width = window.getWidth();
+            if (width > 0) {
+                return width;
+            }
+        }
+        return DEFAULT_BROWSER_WIDTH;
+    }
+
+    /** Window framebuffer height in physical pixels, or the fallback when it cannot be asked. */
+    private static int windowPhysicalHeight(Window window) {
+        if (window != null) {
+            int height = window.getHeight();
+            if (height > 0) {
+                return height;
+            }
+        }
+        return DEFAULT_BROWSER_HEIGHT;
     }
 
     private static KltytonViewport browser(Window window, double actualGuiScale,
@@ -126,7 +148,7 @@ public record KltytonViewport(
         int height = reference.layoutHeight();
         if (window != null) {
             try {
-                int physicalHeight = window.getScreenHeight();
+                int physicalHeight = window.getHeight();
                 if (physicalHeight > 0) {
                     height = Math.max(1, (int) Math.round(physicalHeight / cssScale));
                 }

@@ -88,18 +88,14 @@ class ResourceManagerScrollTest {
             assertTrue(hasContextAction(document, "REFERENCE"));
             contextAction(document, "REFERENCE").click();
             assertEquals(4, document.querySelectorAll(".resource-reference-option").size());
-            assertEquals("java", document.querySelector(".resource-reference-language-select").getValue());
             assertEquals("KltytonUI.screen(\"devtools/index.html\");",
                     document.querySelector(".resource-reference-code").getValue());
             assertEquals("io.github.kltyton.kltytonui.element.TextArea",
                     document.querySelector(".resource-reference-code").getClass().getName());
             assertEquals("KltytonUI.screen(\"devtools/index.html\");",
                     Text.of(document.querySelector(".resource-reference-code")).content);
-            Element language = document.querySelector(".resource-reference-language-select");
-            language.setValue("kjs");
-            language.dispatchEvent(new Event(language, "change", true));
             document.querySelectorAll(".resource-reference-option").get(2).click();
-            assertEquals("let overlay = KltytonUI.createDocument(\"devtools/index.html\")",
+            assertEquals("var overlay = KltytonUI.createDocument(\"devtools/index.html\");",
                     document.querySelector(".resource-reference-code").getValue());
             document.querySelector(".resource-reference-dialog .dialog-close").click();
 

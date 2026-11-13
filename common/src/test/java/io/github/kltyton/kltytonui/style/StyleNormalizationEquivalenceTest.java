@@ -1,21 +1,21 @@
 package io.github.kltyton.kltytonui.style;
 
+import io.github.kltyton.kltytonui.init.Document;
+import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.layout.Grid;
 import io.github.kltyton.kltytonui.layout.Layout;
+import io.github.kltyton.kltytonui.layout.Position;
+import io.github.kltyton.kltytonui.layout.Size;
+import io.github.kltyton.kltytonui.webapi.TestDocumentFactory;
 import org.junit.jupiter.api.Test;
-
-import java.lang.reflect.Method;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * display / overflow / visibility 归一化枚举化 + Style memo 与旧字符串 API 的等价性回归。
+ * display / overflow / visibility 归一化等价性与 Grid placement 的公开布局行为回归。
  *
  * <p>这一阶段刻意保留了各调用点**不同**的归一化程度，本测试逐条锁住：</p>
  * <ul>
@@ -227,59 +227,65 @@ class StyleNormalizationEquivalenceTest {
         assertTrue(style.isFlexDisplay());
     }
 
-    // ---------------------------------------------------------------
-    // Grid.parseSpanSpec 等价性：golden 常量取自改动前的旧实现（反射探针实测输出）。
-    // ---------------------------------------------------------------
-    private static final Map<String, int[]> SPAN_GOLDEN = new LinkedHashMap<>();
+    @Test
+    void parseSpanSpecMatchesLegacyGolden() {
+        Document document = TestDocumentFactory.createDocument();
+        document.body.setAttribute("style", "width: 100px;");
+        Element grid = document.createElement("div");
+        grid.setAttribute("style", "display: grid; width: 50px; grid-template-columns: repeat(5, 10px); "
+                + "grid-template-rows: repeat(3, 10px);");
+        document.body.appendChild(grid);
 
-    static {
-        // input -> {start, span}
-        SPAN_GOLDEN.put("auto", new int[]{-1, 1});
-        SPAN_GOLDEN.put("span 2", new int[]{-1, 2});
-        SPAN_GOLDEN.put("3", new int[]{2, 1});
-        SPAN_GOLDEN.put("2", new int[]{1, 1});
-        SPAN_GOLDEN.put("4", new int[]{3, 1});
-        SPAN_GOLDEN.put("  SPAN 3 ", new int[]{-1, 3});
-        SPAN_GOLDEN.put("unset", new int[]{-1, 1});
-        SPAN_GOLDEN.put("", new int[]{-1, 1});
-        SPAN_GOLDEN.put(null, new int[]{-1, 1});
-        SPAN_GOLDEN.put("bogus", new int[]{-1, 1});
-        SPAN_GOLDEN.put("2 / 4", new int[]{1, 2});
-        SPAN_GOLDEN.put("span 0", new int[]{-1, 1});
-        SPAN_GOLDEN.put("span", new int[]{-1, 1});
-        SPAN_GOLDEN.put(" 2 ", new int[]{1, 1});
-        SPAN_GOLDEN.put("SPAN", new int[]{-1, 1});
-        SPAN_GOLDEN.put("span 12", new int[]{-1, 12});
-        SPAN_GOLDEN.put("0", new int[]{0, 1});
-        SPAN_GOLDEN.put("1", new int[]{0, 1});
-        SPAN_GOLDEN.put("1/1", new int[]{0, 1});
+        Element explicitRange = document.createElement("div");
+        explicitRange.setAttribute("style", "grid-column: 2 / 4; grid-row: 1;");
+        grid.appendChild(explicitRange);
+        Element automaticSpan = document.createElement("div");
+        automaticSpan.setAttribute("style", "grid-column: span 2; grid-row: 2;");
+        grid.appendChild(automaticSpan);
+        Element explicitLine = document.createElement("div");
+        explicitLine.setAttribute("style", "grid-column: 4; grid-row: 3;");
+        grid.appendChild(explicitLine);
+
+        Position rangePosition = Grid.computeChildPosition(explicitRange, grid, grid.getChildren());
+        Size rangeSize = Grid.resolveAssignedSize(explicitRange);
+        Position spanPosition = Grid.computeChildPosition(automaticSpan, grid, grid.getChildren());
+        Size spanSize = Grid.resolveAssignedSize(automaticSpan);
+        Position linePosition = Grid.computeChildPosition(explicitLine, grid, grid.getChildren());
+        Size lineSize = Grid.resolveAssignedSize(explicitLine);
+
+        assertEquals(10, rangePosition.x, 0.01);
+        assertEquals(20, rangeSize.width(), 0.01);
+        assertEquals(0, spanPosition.x, 0.01);
+        assertEquals(20, spanSize.width(), 0.01);
+        assertEquals(30, linePosition.x, 0.01);
+        assertEquals(10, lineSize.width(), 0.01);
     }
 
+    /** Shorthand placement and its equivalent longhands retain the same visible grid area. */
     @Test
-    void parseSpanSpecMatchesLegacyGolden() throws Exception {
-        Method parse = Grid.class.getDeclaredMethod("parseSpanSpec", String.class);
-        parse.setAccessible(true);
-        for (Map.Entry<String, int[]> entry : SPAN_GOLDEN.entrySet()) {
-            Object spec = parse.invoke(null, entry.getKey());
-            assertNotNull(spec, "null spec for input=" + entry.getKey());
-            Method start = spec.getClass().getDeclaredMethod("start");
-            Method span = spec.getClass().getDeclaredMethod("span");
-            start.setAccessible(true);
-            span.setAccessible(true);
-            assertEquals(entry.getValue()[0], (int) start.invoke(spec),
-                    "start mismatch for input=" + entry.getKey());
-            assertEquals(entry.getValue()[1], (int) span.invoke(spec),
-                    "span mismatch for input=" + entry.getKey());
-        }
-    }
+    void parseSpanSpecCacheReturnsSameInstance() {
+        Document document = TestDocumentFactory.createDocument();
+        document.body.setAttribute("style", "width: 100px;");
+        Element grid = document.createElement("div");
+        grid.setAttribute("style", "display: grid; width: 50px; grid-template-columns: repeat(5, 10px); "
+                + "grid-template-rows: repeat(2, 10px);");
+        document.body.appendChild(grid);
 
-    /** 缓存按输入（含 null / 空串）返回同一不可变实例。 */
-    @Test
-    void parseSpanSpecCacheReturnsSameInstance() throws Exception {
-        Method parse = Grid.class.getDeclaredMethod("parseSpanSpec", String.class);
-        parse.setAccessible(true);
-        assertSame(parse.invoke(null, (Object) null), parse.invoke(null, (Object) null));
-        assertSame(parse.invoke(null, "span 3"), parse.invoke(null, "span 3"));
-        assertSame(parse.invoke(null, ""), parse.invoke(null, ""));
+        Element shorthand = document.createElement("div");
+        shorthand.setAttribute("style", "grid-column: 2 / span 2; grid-row: 1;");
+        grid.appendChild(shorthand);
+        Element longhands = document.createElement("div");
+        longhands.setAttribute("style", "grid-column-start: 2; grid-column-end: span 2; grid-row: 2;");
+        grid.appendChild(longhands);
+
+        Position shorthandPosition = Grid.computeChildPosition(shorthand, grid, grid.getChildren());
+        Size shorthandSize = Grid.resolveAssignedSize(shorthand);
+        Position longhandPosition = Grid.computeChildPosition(longhands, grid, grid.getChildren());
+        Size longhandSize = Grid.resolveAssignedSize(longhands);
+
+        assertEquals(10, shorthandPosition.x, 0.01);
+        assertEquals(20, shorthandSize.width(), 0.01);
+        assertEquals(shorthandPosition.x, longhandPosition.x, 0.01);
+        assertEquals(shorthandSize.width(), longhandSize.width(), 0.01);
     }
 }

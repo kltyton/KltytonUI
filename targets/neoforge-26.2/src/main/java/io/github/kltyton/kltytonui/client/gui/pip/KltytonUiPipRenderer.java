@@ -72,7 +72,7 @@ public final class KltytonUiPipRenderer extends PictureInPictureRenderer<Kltyton
         // Vanilla cleared its own depth texture before renderToTexture; ours
         // needs the same per-frame reset (depth + stencil).
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        encoder.clearDepthTexture(stencilDepthTexture, 1.0);
+        encoder.clearDepthTexture(stencilDepthTexture, 0.0);
         encoder.clearStencilTexture(stencilDepthTexture, 0);
     }
 

@@ -1,6 +1,5 @@
 # 容器使用文档
 
-本文的 KubeJS 示例适用于 Forge 1.20.1 和 NeoForge 1.21.1；Java API 可用于其他 target。完整差异见[总览](overview#loader-与脚本支持)。
 
 容器页面有两个层次，缺一不可：
 
@@ -44,7 +43,7 @@
 </html>
 ```
 
-服务端打开（KubeJS 服务端脚本写法一样）：
+服务端打开：
 
 ```java
 public static void open(ServerPlayer player) {
@@ -104,21 +103,10 @@ KltytonUI.menu(player, "screens/furnace.html")
                 .player());
 ```
 
-KubeJS 也使用同一组工厂和组合语义：
 
-```javascript
-KltytonUI.menu(player, "screens/furnace.html")
-    .bind(function (binding) {
-        binding.blockEntity(pos)
-            .slot("slot.input").filter(FilterUtil.not(FilterUtil.item(Items.LAVA_BUCKET)))
-            .slot("slot.fuel").filter(FilterUtil.anyOf(FilterUtil.item(Items.COAL), FilterUtil.tag("c:coals")))
-            .player();
-    });
-```
+`FilterUtil` 可用于 Java：`ANY`（接受全部）、`NONE`（拒绝全部）、`EMPTY`（只接受空 ItemStack）；`item(Item)`、`tag(String)` / `tag(TagKey<Item>)`、`custom(Predicate<ItemStack>)`；以及 `allOf(...)`、`anyOf(...)`、`not(...)`。`and(...)`、`or(...)`、`negate()` 可继续组合已有过滤器。未调用 `.filter(...)` 时保留原有行为。这个过滤视图仅属于本次 KUI 菜单，不会修改机器 capability、漏斗或其他菜单的全局插入规则。无效 selector、未命中、匹配到嵌套 container / recipe 槽位或越界 local index 会被忽略并记 warning。
 
-`FilterUtil` 可用于 Java 和 KubeJS：`ANY`（接受全部）、`NONE`（拒绝全部）、`EMPTY`（只接受空 ItemStack）；`item(Item)`、`tag(String)` / `tag(TagKey<Item>)`、`custom(Predicate<ItemStack>)`；以及 `allOf(...)`、`anyOf(...)`、`not(...)`。`and(...)`、`or(...)`、`negate()` 可继续组合已有过滤器。未调用 `.filter(...)` 时保留原有行为。这个过滤视图仅属于本次 KUI 菜单，不会修改机器 capability、漏斗或其他菜单的全局插入规则。无效 selector、未命中、匹配到嵌套 container / recipe 槽位或越界 local index 会被忽略并记 warning。
-
-这是一次 API 迁移：旧的 `binding.blockEntity(pos).filter(...)` 已移除，必须改为 `binding.blockEntity(pos).slot("...").filter(...)`。同类型只能绑一个——要两台机器就得用高级声明 API：`KltytonScreenNetworkHandler.openScreen(player, path, declarations, argsById)`，每个 `ContainerDeclaration` 自带 id、类型、容量和 primary，参数通过 argsById 传（block_entity 要 `x/y/z`，entity 要 `entity_id`，saved_data 可选 `data_name`）。HTML 的容器 id 必须和声明 id 一致。这是给 Java 模组代码用的，KubeJS 脚本一般用不到；该高级入口不接收 slot 过滤规则。
+这是一次 API 迁移：旧的 `binding.blockEntity(pos).filter(...)` 已移除，必须改为 `binding.blockEntity(pos).slot("...").filter(...)`。同类型只能绑一个——要两台机器就得用高级声明 API：`KltytonScreenNetworkHandler.openScreen(player, path, declarations, argsById)`，每个 `ContainerDeclaration` 自带 id、类型、容量和 primary，参数通过 argsById 传（block_entity 要 `x/y/z`，entity 要 `entity_id`，saved_data 可选 `data_name`）。HTML 的容器 id 必须和声明 id 一致。该高级入口不接收 slot 过滤规则。
 
 旧入口（`openScreen` 等）还在，新代码别用。旧示例里的 `KltytonUI.bind()`、`primarySavedData()` 之类已不是现行 API。
 

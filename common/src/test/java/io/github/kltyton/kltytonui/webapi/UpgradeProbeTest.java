@@ -14,6 +14,7 @@ class UpgradeProbeTest {
         Element root = document.createHTML(
                 "<div class=\"wrap\"><div class=\"toolbar\"></div>"
                         + "<div id=\"editor\" contenteditable=\"true\" spellcheck=\"false\"></div></div>");
+        document.body.appendChild(root);
         Element editor = document.getElementById("editor");
         assertTrue(editor instanceof io.github.kltyton.kltytonui.element.RichText,
                 "nested contenteditable div must upgrade to RichText, got "
@@ -58,28 +59,21 @@ class UpgradeProbeTest {
                 + " off=" + sel.getAnchorOffset());
     }
 
-    /** Rhino 直接读未装饰节点的 parentElement/nodeType(页面 readSelection 依赖)。 */
+    /** 页面 readSelection 依赖文本节点的 parentElement 和 nodeType。 */
     @Test
-    void rhinoReadsRawNodeProperties() {
-        Document document = TestDocumentFactory.createDocument();
-        Element p = document.createElement("p");
-        io.github.kltyton.kltytonui.dom.TextNode tn = document.createTextNode("hello");
-        p.appendChild(tn);
-        document.body.appendChild(p);
-
-        dev.latvian.mods.rhino.Context cx = RhinoTestSupport.enterContext();
-        try {
-            dev.latvian.mods.rhino.Scriptable scope = cx.initStandardObjects();
-            RhinoTestSupport.put(cx, scope, "TN", tn);
-            RhinoTestSupport.put(cx, scope, "P", p);
-            Object r = cx.evaluateString(scope,
-                    "var host = TN.nodeType === 1 ? TN : TN.parentElement;"
-                    + " host ? (host.tagName + '|' + TN.nodeType) : 'no-host';",
-                    "raw", 1, null);
-            System.out.println("[probe] raw node props: " + r);
-            assertTrue(("P|3").equals(r), "raw node parentElement/nodeType must resolve, got " + r);
-        } finally {
-        }
+    void neonReadsTextNodeProperties() {
+        TestDocumentFactory.withNeonDocument(document -> {
+            Element p = document.createElement("p");
+            p.setAttribute("id", "node-probe");
+            p.appendChild(document.createTextNode("hello"));
+            document.body.appendChild(p);
+            io.github.kltyton.kltytonui.script.neon.NeonPageRuntime.eval(
+                    "var tn = document.querySelector('#node-probe').firstChild;"
+                            + "var host = tn.nodeType === 1 ? tn : tn.parentElement;"
+                            + "document.body.setAttribute('data-result', host ? host.tagName + '|' + tn.nodeType : 'no-host');",
+                    null, "raw-node-properties");
+            assertTrue("P|3".equals(document.body.getAttribute("data-result")));
+        });
     }
 
 }

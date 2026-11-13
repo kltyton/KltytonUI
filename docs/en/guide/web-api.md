@@ -1,8 +1,8 @@
 # KltytonUI Web API
 
-KUI is not Chromium and has no browser engine. On supported targets, page JavaScript runs on Rhino, while the Java-side Document, Element, events, and resource pipeline are bridged into browser-style objects. So the APIs here fall into three categories:
+KUI is not Chromium and has no browser engine. On targets with page-script support, page JavaScript runs on the embedded NeonJS 0.1.4 JVM runtime with an independent JavaScript realm for each page document; Java provides the browser-style Document, Element, event, and resource APIs. Page scripts support modern JavaScript, but KUI does not provide a full browser or browser DOM engine. So the APIs here fall into three categories:
 
-> **Runtime dependency**: all supported targets use the standalone Rhino page runtime; page scripts do not require KubeJS. Install the Rhino dependency matching the loader and Minecraft version. See the [overview](overview#loader-and-script-support) for target availability and optional KubeJS bindings.
+> KUI embeds the NeonJS page runtime. Its JIT targets Java 17, and Intl uses Minecraft's ICU4J.
 
 - **Available**: use them directly as shown in the examples below;
 - **Lightweight compatibility**: same names and common call patterns as the browser, but with reduced return values, timing, or parameter ranges;
@@ -29,7 +29,7 @@ For CSS properties and layout, see [HTML/CSS Coverage](html-css-coverage); for p
 </script>
 ```
 
-Page scripts should stick to `var`, plain `function`, and traditional loops. KUI performs compatibility transforms for some modern syntax, but Rhino is not a modern JS engine — don't bet on it.
+Page scripts run on NeonJS and support modern JavaScript syntax. The browser-style APIs provided by KUI remain the Java implementation subset listed in this document.
 
 ## Global Objects
 
@@ -55,7 +55,7 @@ Each Document has its own `document`, and they share one window compatibility ob
 ```javascript
 window.innerWidth          // Document logical viewport size
 window.innerHeight
-window.devicePixelRatio    // Minecraft GUI scale
+window.devicePixelRatio    // physical pixels per document CSS pixel (device scale)
 ```
 
 The `clientX/clientY` in events are already logical coordinates — do not multiply them by devicePixelRatio or renderScale again.
@@ -402,7 +402,7 @@ Don't call `refresh()` every frame — it rebuilds the entire page; it is a relo
 
 **Dual script content**: a `<script>` with both `src` and inline code executes both (with a warning). Don't rely on the browser behavior of "src ignores inline".
 
-**Log prefixes**: when troubleshooting, search for `[KUI HTML]` / `[KUI CSS]` / `[KUI JS]` / `[KUI Fetch]` / `[KUI Canvas]` / `[KUI Event]`, usually with a resource path attached. Standalone pages write `console.log/debug/warn/error` and `console.time/timeEnd` to the KUI log; shared KubeJS scripts keep their existing `console`.
+**Log prefixes**: when troubleshooting, search for `[KUI HTML]` / `[KUI CSS]` / `[KUI JS]` / `[KUI Fetch]` / `[KUI Canvas]` / `[KUI Event]`, usually with a resource path attached. Standalone pages write `console.log/debug/warn/error` and `console.time/timeEnd` to the KUI log.
 
 **Top layer**: the host-side `setTopLayer(true)` makes popups and dropdown menus draw last within the current Document and not get clipped by ancestor overflow. It only affects ordering within this Document; it does not lift one Document above another.
 

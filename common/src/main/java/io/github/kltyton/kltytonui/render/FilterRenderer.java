@@ -25,6 +25,10 @@ import java.util.Stack;
 
 public class FilterRenderer {
     private static final Stack<FboHandle> fboStack = new Stack<>();
+    private static final Stack<Mask.TargetStencilState> stencilStack = new Stack<>();
+    private static final Stack<ClipLayer> clipLayers = new Stack<>();
+    private static final Stack<FrameBoundary> frameBoundaries = new Stack<>();
+    private static final FrameBoundary ROOT_FRAME = new FrameBoundary(0, 0, null);
     private static FboHandle mainRenderTarget;
     private static final List<FboHandle> fboPool = new ArrayList<>();
     private static int poolPointer = 0;
@@ -35,6 +39,7 @@ public class FilterRenderer {
     private static final float MAX_REASONABLE_BACKDROP_BLUR = 32.0f;
     private static boolean stencilCapabilityResolved;
     private static boolean stencilAvailable = true;
+    private static final ThreadLocal<Stack<FboHandle>> SCREEN_TARGETS = ThreadLocal.withInitial(Stack::new);
 
     /**
      * Returns whether KUI may allocate/use a stencil attachment for the
@@ -57,7 +62,9 @@ public class FilterRenderer {
         try {
             if (!KuiServices.render().supportsStencil()) {
                 stencilAvailable = false;
-                KltytonUI.LOGGER.warn("[KltytonUI] stencil masks are unavailable on this render backend; using scissor fallback");
+                if (!KuiServices.render().usesClipLayers()) {
+                    KltytonUI.LOGGER.warn("[KltytonUI] stencil masks are unavailable on this render backend; using scissor fallback");
+                }
                 return;
             }
             String version = KuiServices.render().getGLVersionString();
@@ -73,32 +80,56 @@ public class FilterRenderer {
         }
     }
 
+    /** Uses a retained screen target as the logical parent for nested filters. */
+    public static KuiRenderService.RenderStateScope pushScreenTarget(FboHandle target) {
+        Stack<FboHandle> targets = SCREEN_TARGETS.get();
+        targets.push(target);
+        return () -> {
+            if (!targets.isEmpty()) targets.pop();
+            if (targets.isEmpty()) SCREEN_TARGETS.remove();
+        };
+    }
+
     public static void beginFrame() {
-        warnOffscreenLeak("beginFrame");
-        // 防御式清理：若上帧因异常或节点错配残留栈，避免 poolPointer 无界增长
-        if (!fboStack.isEmpty()) {
-            fboStack.clear();
+        BackgroundPainter.beginFrame();
+        if (!clipLayers.isEmpty()) {
+            // A world-window clip can enclose an entire document render.
+            // Keep its target bound until the enclosing clip is popped.
+            frameBoundaries.push(new FrameBoundary(fboStack.size(), clipLayers.size(), compositingReference));
+            return;
         }
+        warnOffscreenLeak("beginFrame");
+        while (!fboStack.isEmpty()) popLayerAndBindParent();
         mainRenderTarget = KuiServices.render().getMainRenderTarget();
         poolPointer = 0;
         backdropPoolPointer = 0;
         // The reference is a frame-scoped backdrop source. Holding an FBO
         // from the previous frame can sample a destroyed or resized target.
         compositingReference = null;
+        frameBoundaries.push(ROOT_FRAME);
     }
 
     public static void endFrame() {
-        warnOffscreenLeak("endFrame");
-        if (!fboStack.isEmpty()) {
-            fboStack.clear();
-            if (mainRenderTarget != null) {
-                KuiServices.render().bindWrite(mainRenderTarget, false);
-            }
+        FrameBoundary boundary = frameBoundaries.pop();
+        if (fboStack.size() > boundary.targetDepth()) {
+            warnOffscreenLeak("endFrame");
+            while (fboStack.size() > boundary.targetDepth()) popLayerAndBindParent();
         }
-        compositingReference = null;
+        while (clipLayers.size() > boundary.clipDepth()) clipLayers.pop();
+        compositingReference = boundary.compositingReference();
     }
 
     public static void pushFilter() {
+        KuiRenderService renderer = KuiServices.render();
+        if (renderer.usesClipLayers()) {
+            FboHandle parent = getCurrentTarget();
+            pushFilter(renderer.clipTargetWidth(parent), renderer.clipTargetHeight(parent));
+        } else {
+            pushFilter((int) KuiServices.client().getWindowWidth(), (int) KuiServices.client().getWindowHeight());
+        }
+    }
+
+    private static void pushFilter(int width, int height) {
         // Pending parent draws must land in the parent target before the child
         // filter binds its offscreen target. Otherwise they inherit the child's opacity.
         // 用 commitDraws 而不是只刷 Graph/贴图队列：默认字体的文本由 Font.drawInBatch
@@ -106,31 +137,122 @@ public class FilterRenderer {
         Base.commitDraws();
 
         if (fboStack.isEmpty()) {
-            mainRenderTarget = KuiServices.render().getMainRenderTarget();
+            mainRenderTarget = getCurrentTarget();
             poolPointer = 0;
         }
 
         FboHandle temp;
-        double width = KuiServices.client().getWindowWidth();
-        double height = KuiServices.client().getWindowHeight();
-
+        boolean newTarget = false;
         if (poolPointer < fboPool.size()) {
             temp = fboPool.get(poolPointer);
-            if (temp.width != (int) width || temp.height != (int) height) {
-                KuiServices.render().destroyBuffers(temp);
-                temp = KuiServices.render().createOffscreenTarget((int) width, (int) height, true);
+            if (temp.width != width || temp.height != height) {
+                FboHandle previous = temp;
+                temp = KuiServices.render().createOffscreenTarget(width, height, true);
                 fboPool.set(poolPointer, temp);
+                KuiServices.render().destroyBuffers(previous);
+                newTarget = true;
             }
         } else {
-            temp = KuiServices.render().createOffscreenTarget((int) width, (int) height, true);
+            temp = KuiServices.render().createOffscreenTarget(width, height, true);
             fboPool.add(temp);
+            newTarget = true;
         }
         poolPointer++;
 
-        // 注意：这里的 clear 会清除当前绑定的 FBO 的缓冲区
-        KuiServices.render().clear(temp, 0f, 0f, 0f, 0f);
-        fboStack.push(temp);
-        KuiServices.render().bindWrite(temp, false);
+        FboHandle parent = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
+        Mask.TargetStencilState parentStencil = Mask.enterOffscreenTarget();
+        boolean targetPushed = false;
+        boolean stencilPushed = false;
+        try {
+            fboStack.push(temp);
+            targetPushed = true;
+            stencilStack.push(parentStencil);
+            stencilPushed = true;
+            // Legacy loaders may reallocate the depth attachment when stencil is added.
+            // Do that before any content is drawn into this pooled target.
+            if (newTarget && isStencilAvailable()) KuiServices.render().enableStencil(temp);
+            KuiServices.render().clear(temp, 0f, 0f, 0f, 0f);
+            KuiServices.render().bindWrite(temp, false);
+        } catch (RuntimeException | Error failure) {
+            try {
+                if (stencilPushed) {
+                    popLayerAndBindParent();
+                } else {
+                    if (targetPushed) fboStack.pop();
+                    if (parent != null) KuiServices.render().bindWrite(parent, false);
+                    Mask.restoreTargetStencil(parentStencil);
+                }
+            } catch (RuntimeException | Error restoreFailure) {
+                failure.addSuppressed(restoreFailure);
+            }
+            throw failure;
+        }
+    }
+
+    /** Begins a clip layer with the parent's current color and depth. */
+    static void pushClipLayer() {
+        KuiRenderService renderer = KuiServices.render();
+        FboHandle parent = getCurrentTarget();
+        int width = renderer.clipTargetWidth(parent);
+        int height = renderer.clipTargetHeight(parent);
+        if (width <= 0 || height <= 0) {
+            throw new IllegalStateException("Clip source has invalid dimensions: " + width + "x" + height);
+        }
+        int previousPointer = fboStack.isEmpty() ? 0 : poolPointer;
+        int previousDepth = fboStack.size();
+        try {
+            pushFilter(width, height);
+            FboHandle content = fboStack.peek();
+            renderer.copyClipSource(parent, content);
+            renderer.bindWrite(content, false);
+            clipLayers.push(new ClipLayer(content, previousPointer));
+        } catch (RuntimeException | Error failure) {
+            try {
+                while (fboStack.size() > previousDepth) popLayerAndBindParent();
+            } catch (RuntimeException | Error restoreFailure) {
+                failure.addSuppressed(restoreFailure);
+            }
+            poolPointer = previousPointer;
+            throw failure;
+        }
+    }
+
+    /** Restores only pixels covered by the supplied mask geometry. */
+    static void popClipLayer(Runnable drawMask) {
+        ClipLayer layer = clipLayers.peek();
+        if (fboStack.isEmpty() || fboStack.peek() != layer.content()) {
+            throw new IllegalStateException("Clip and filter layers are unbalanced");
+        }
+        try {
+            try {
+                Base.commitDraws();
+            } finally {
+                popLayerAndBindParent();
+                clipLayers.pop();
+            }
+            try (KuiRenderService.RenderStateScope ignored = KuiServices.render().beginClipComposite(layer.content())) {
+                drawMask.run();
+            }
+        } finally {
+            // The composite is submitted before another layer can reuse this target.
+            poolPointer = layer.previousPointer();
+        }
+    }
+
+    private record ClipLayer(FboHandle content, int previousPointer) { }
+
+    private record FrameBoundary(int targetDepth, int clipDepth, FboHandle compositingReference) { }
+
+    /** Leaves one offscreen layer and restores the parent target's clip state. */
+    private static FboHandle popLayerAndBindParent() {
+        FboHandle child = fboStack.peek();
+        Mask.TargetStencilState parentStencil = stencilStack.peek();
+        FboHandle parent = fboStack.size() == 1 ? mainRenderTarget : fboStack.get(fboStack.size() - 2);
+        if (parent != null) KuiServices.render().bindWrite(parent, true);
+        Mask.restoreTargetStencil(parentStencil);
+        fboStack.pop();
+        stencilStack.pop();
+        return child;
     }
 
     /**
@@ -149,6 +271,9 @@ public class FilterRenderer {
     }
 
     public static FboHandle getCurrentTarget() {
+        if (!fboStack.isEmpty()) return fboStack.peek();
+        Stack<FboHandle> targets = SCREEN_TARGETS.get();
+        if (!targets.isEmpty()) return targets.peek();
         return fboStack.isEmpty() ? KuiServices.render().getMainRenderTarget() : fboStack.peek();
     }
 
@@ -159,8 +284,10 @@ public class FilterRenderer {
      * 最后以恒等 filter 把 C 合成回父目标。mask 值取 alpha 还是 luminance
      * 由 {@link MaskImage#effectiveLuminance} 决定（混合 mode 按 alpha）。
      *
-     * <p>加载失败/未就绪导致一层都画不上时跳过 dst-in，内容保持可见
-     * （fail-open，与浏览器"遮罩失败=全遮掉"的行为不同，见文档）。</p>
+     * <p>一层都画不上时分两种情形（{@link MaskImagePainter.LayerPaint}）：纹理仍在异步加载
+     * 说明结果未知，此时跳过 dst-in、内容保持可见，等加载完成触发的重绘；而图像无效/解码失败
+     * 是不可恢复的终态，按 CSS Masking 1 §6.1 视为 transparent black——内容整体被遮住，
+     * 与浏览器一致。</p>
      */
     public static void popMaskImage(Element target, PoseStack poseStack) {
         if (fboStack.isEmpty()) return;
@@ -170,36 +297,48 @@ public class FilterRenderer {
 
         List<MaskImage.ResolvedLayer> layers = MaskImage.layersOf(target);
 
-        // 注意顺序：必须在内容 FBO C 出栈之前取 mask 画布 M。
-        // 根级 mask 下栈一空 pushFilter 会把 poolPointer 归零，M 可能复用到 C 本身。
-        pushFilter();
-        FboHandle maskFbo = fboStack.peek();
-        boolean painted;
+        // Keep the content layer on the stack while acquiring and painting the mask.
+        FboHandle contentFbo = fboStack.peek();
+        boolean composite = false;
         try {
-            painted = paintMaskLayers(target, poseStack, layers, maskFbo);
-        } finally {
-            ImageDrawer.flushBatch();
-            Graph.endBatch();
-            // mask 画布用完即出栈（不做 filter 合成）；stencil/scissor 状态
-            // 已由 MaskImagePainter 内部的 Mask.push/pop 成对恢复
-            fboStack.pop();
-        }
-
-        FboHandle contentFbo = fboStack.pop();
-        FboHandle parentFbo = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
-        try {
-            if (painted) {
-                KuiServices.render().bindWrite(contentFbo, true);
+            pushFilter();
+            FboHandle maskFbo = fboStack.peek();
+            MaskPaintResult paint;
+            try {
+                paint = paintMaskLayers(target, poseStack, layers);
+            } finally {
+                try {
+                    ImageDrawer.flushBatch();
+                    Graph.endBatch();
+                } finally {
+                    popLayerAndBindParent();
+                }
+            }
+            if (!paint.painted() && !paint.pending()) {
+                // mask 图像不可用/无效按 transparent black 处理：遮罩值处处为 0，
+                // 等价于 dst-in 乘一张全透明遮罩——内容层整体丢弃，不做恒等合成。
+                return;
+            }
+            if (paint.painted()) {
                 drawMaskBlit(maskFbo, MaskImage.effectiveLuminance(layers));
             }
             // The identity composite below samples the content group; resolve it so
             // the sampler reads the masked content rather than the pre-mask pixels.
             KuiServices.render().resolveTarget(contentFbo);
-            KuiServices.render().bindWrite(parentFbo, true);
-            drawWithShader(contentFbo, contentFbo, Filter.FilterState.EMPTY, 1.0f);
+            composite = true;
+        } finally {
+            popLayerAndBindParent();
+        }
+        FboHandle parentFbo = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
+        try {
+            if (composite) drawWithShader(contentFbo, contentFbo, Filter.FilterState.EMPTY, 1.0f);
         } finally {
             if (parentFbo != null) KuiServices.render().bindWrite(parentFbo, true);
         }
+    }
+
+    /** 一层 mask 的绘制汇总：{@code painted} 有层画上了内容，{@code pending} 仍有层在异步加载。 */
+    private record MaskPaintResult(boolean painted, boolean pending) {
     }
 
     /**
@@ -207,34 +346,46 @@ public class FilterRenderer {
      * intersect/subtract/exclude 层先画进 scratch FBO L（栈上有 M，pushFilter 不会
      * 重置 poolPointer，L 必然是新 FBO），再以对应 Porter-Duff 混合 merge 回 M。
      * 最底层的 composite 值没有意义（下方无可合成对象），按 add 处理。
+     *
+     * <p>返回值只汇总两种"没画上"：{@code pending} 有层仍在加载（结果未知），
+     * {@code painted} 有层真画上了内容。逐层跳过画不出来的 scratch 层是既有行为
+     * （保留已累积的 M），也就是与规范有偏差的地方只在"有效层 + 无效层混合且带
+     * intersect/subtract/exclude"这一种组合；{@link #popMaskImage} 只在所有层都没画上
+     * 且没有层仍在加载（即都已成终态）时按 transparent black 整体遮挡。</p>
      */
-    private static boolean paintMaskLayers(Element target, PoseStack poseStack,
-                                           List<MaskImage.ResolvedLayer> layers, FboHandle maskFbo) {
-        boolean any = false;
+    private static MaskPaintResult paintMaskLayers(Element target, PoseStack poseStack,
+                                                   List<MaskImage.ResolvedLayer> layers) {
+        boolean painted = false;
+        boolean pending = false;
         for (int i = layers.size() - 1; i >= 0; i--) {
             MaskImage.ResolvedLayer layer = layers.get(i);
             KuiRenderService.MaskCompositeOp op = mergeOpOf(layer.composite());
             if (op == null || i == layers.size() - 1) {
-                any |= MaskImagePainter.paintLayer(target, poseStack, layer);
+                MaskImagePainter.LayerPaint result = MaskImagePainter.paintLayer(target, poseStack, layer);
+                painted |= result == MaskImagePainter.LayerPaint.PAINTED;
+                pending |= result == MaskImagePainter.LayerPaint.PENDING;
                 continue;
             }
             pushFilter();
             FboHandle scratchFbo = fboStack.peek();
-            boolean scratchPainted;
+            MaskImagePainter.LayerPaint result;
             try {
-                scratchPainted = MaskImagePainter.paintLayer(target, poseStack, layer);
+                result = MaskImagePainter.paintLayer(target, poseStack, layer);
             } finally {
-                ImageDrawer.flushBatch();
-                Graph.endBatch();
-                fboStack.pop();
+                try {
+                    ImageDrawer.flushBatch();
+                    Graph.endBatch();
+                } finally {
+                    popLayerAndBindParent();
+                }
             }
-            if (scratchPainted) {
-                KuiServices.render().bindWrite(maskFbo, true);
+            if (result == MaskImagePainter.LayerPaint.PENDING) pending = true;
+            if (result == MaskImagePainter.LayerPaint.PAINTED) {
                 drawMaskMergeBlit(scratchFbo, op);
-                any = true;
+                painted = true;
             }
         }
-        return any;
+        return new MaskPaintResult(painted, pending);
     }
 
     /** 非 add 的 composite 值映射到 Porter-Duff merge 算子；add/未知值返回 null。 */
@@ -249,16 +400,18 @@ public class FilterRenderer {
 
     /**
      * dst-in 全窗 blit：dest(C) *= src(M) 的 mask 值（alpha 或 luminance）。
-     * legacy 端由 filter_mask 着色器 JSON 自带 zero/srcalpha 混合
-     * （ShaderInstance.apply 会覆盖动态混合状态，不能靠 setBlendFuncSeparate），
-     * 26.1 端由 filter_mask pipeline 烘焙同款混合。
+     * Legacy 的 JSON 和 26.1 的 pipeline 均声明 zero/src-alpha；这里也显式
+     * 启用混合并设置 legacy GL 因子，避免 ShaderInstance 的混合态缓存跳过 apply
+     * 后沿用 source-over 因子（或关闭混合，直接把黑色 shader 输出覆盖到 C）。
      */
     private static void drawMaskBlit(FboHandle maskFbo, boolean luminance) {
         Object shader = KuiServices.render().getFilterMaskShader(luminance);
         if (shader == null) return; // 后端未提供 mask shader 时 fail-open
 
-        withBlendRenderState(false, () -> {
+        withBlendRenderState(true, () -> {
             Base.setShader(shader);
+            KuiServices.render().setBlendFuncSeparate(
+                    GL11.GL_ZERO, GL11.GL_SRC_ALPHA, GL11.GL_ZERO, GL11.GL_SRC_ALPHA);
             KuiServices.render().bindColorTexture(maskFbo, 0);
             Base.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
             KuiServices.render().setShaderUniformFloat("MaskLuminance", luminance ? 1.0f : 0.0f);
@@ -279,15 +432,20 @@ public class FilterRenderer {
 
     /**
      * mask-composite merge 全窗 blit：L(src) 按 Porter-Duff 算子合成进 M(dst)。
-     * 算子完全由后端烘焙的混合状态表达（source-in / source-out / xor），
-     * 着色器只做 Sampler0 透传。
+     * legacy 的 shader JSON 与 pipeline 均声明 source-in / source-out / xor，
+     * 着色器只做 Sampler0 透传；legacy 还需显式恢复因子以防 shader 混合态缓存命中。
      */
     private static void drawMaskMergeBlit(FboHandle scratchFbo, KuiRenderService.MaskCompositeOp op) {
         Object shader = KuiServices.render().getFilterMaskMergeShader(op);
         if (shader == null) return; // 后端不支持 merge 时丢弃该层（fail-open）
 
-        withBlendRenderState(false, () -> {
+        withBlendRenderState(true, () -> {
             Base.setShader(shader);
+            int src = op == KuiRenderService.MaskCompositeOp.INTERSECT ? GL11.GL_DST_ALPHA
+                    : GL11.GL_ONE_MINUS_DST_ALPHA;
+            int dst = op == KuiRenderService.MaskCompositeOp.EXCLUDE
+                    ? GL11.GL_ONE_MINUS_SRC_ALPHA : GL11.GL_ZERO;
+            KuiServices.render().setBlendFuncSeparate(src, dst, src, dst);
             KuiServices.render().bindColorTexture(scratchFbo, 0);
             Base.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 
@@ -338,7 +496,7 @@ public class FilterRenderer {
         // 只刷那两个后端会让本层文字漏到合成层外面。
         Base.commitDraws();
 
-        FboHandle currentFbo = fboStack.pop();
+        FboHandle currentFbo = popLayerAndBindParent();
         FboHandle parentFbo = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
         try {
             FboHandle filteredFbo = prepareFullFilterSource(currentFbo, state.blurRadius());
@@ -366,18 +524,22 @@ public class FilterRenderer {
         if (fboStack.isEmpty()) return;
         // 合成前把本层待提交的绘制落进离屏目标；共享顶点缓冲（默认字体文本）也在其中。
         Base.commitDraws();
-        FboHandle source = fboStack.pop();
+        FboHandle source = popLayerAndBindParent();
         FboHandle parent = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
         if (parent == null) return;
 
-        FboHandle reference = compositingReference != null ? compositingReference : parent;
-        FboHandle backdrop = snapshotReference(reference);
-        // Both textures are sampled by the blend pass; resolve the freshly written
-        // layer (and the snapshot) so the sampler sees them.
-        KuiServices.render().resolveTarget(source);
-        if (backdrop != null) KuiServices.render().resolveTarget(backdrop);
-        KuiServices.render().bindWrite(parent, true);
-        drawBlend(source, backdrop, mode);
+        try {
+            FboHandle reference = compositingReference != null ? compositingReference : parent;
+            FboHandle backdrop = snapshotReference(reference);
+            // Both textures are sampled by the blend pass; resolve the freshly written
+            // layer (and the snapshot) so the sampler sees them.
+            KuiServices.render().resolveTarget(source);
+            if (backdrop != null) KuiServices.render().resolveTarget(backdrop);
+            KuiServices.render().bindWrite(parent, true);
+            drawBlend(source, backdrop, mode);
+        } finally {
+            KuiServices.render().bindWrite(parent, true);
+        }
     }
 
     private static FboHandle snapshotReference(FboHandle reference) {
@@ -703,24 +865,31 @@ public class FilterRenderer {
         Object shader = KuiServices.render().getFilterBlurShader();
         if (shader == null) return;
 
-        KuiServices.render().clear(target, 0, 0, 0, 0);
-        KuiServices.render().bindWrite(target, true);
-        withBlendRenderState(false, () -> {
-            Base.setProjectionMatrix(orthoProjection(target.width, target.height));
-            Base.setShader(shader);
-            KuiServices.render().setShaderUniform2f("Direction", directionX, directionY);
-            KuiServices.render().setShaderUniformFloat("Radius", Math.min(32.0f, radius));
-            KuiServices.render().bindColorTexture(source, 0);
-            Base.setShaderColor(1, 1, 1, 1);
+        FboHandle previous = fboStack.isEmpty() ? mainRenderTarget : fboStack.peek();
+        Mask.suspendStencilForScratch();
+        try {
+            KuiServices.render().clear(target, 0, 0, 0, 0);
+            KuiServices.render().bindWrite(target, true);
+            withBlendRenderState(false, () -> {
+                Base.setProjectionMatrix(orthoProjection(target.width, target.height));
+                Base.setShader(shader);
+                KuiServices.render().setShaderUniform2f("Direction", directionX, directionY);
+                KuiServices.render().setShaderUniformFloat("Radius", Math.min(32.0f, radius));
+                KuiServices.render().bindColorTexture(source, 0);
+                Base.setShaderColor(1, 1, 1, 1);
 
-            MeshBuilder mesh = KuiServices.render().beginMesh(MeshMode.QUADS, MeshFormat.POSITION_TEX);
-            Matrix4f identity = new Matrix4f();
-            mesh.vertexUV(identity, 0, target.height, 0, 0, 0);
-            mesh.vertexUV(identity, target.width, target.height, 0, 1, 0);
-            mesh.vertexUV(identity, target.width, 0, 0, 1, 1);
-            mesh.vertexUV(identity, 0, 0, 0, 0, 1);
-            mesh.submit();
-        });
+                MeshBuilder mesh = KuiServices.render().beginMesh(MeshMode.QUADS, MeshFormat.POSITION_TEX);
+                Matrix4f identity = new Matrix4f();
+                mesh.vertexUV(identity, 0, target.height, 0, 0, 0);
+                mesh.vertexUV(identity, target.width, target.height, 0, 1, 0);
+                mesh.vertexUV(identity, target.width, 0, 0, 1, 1);
+                mesh.vertexUV(identity, 0, 0, 0, 0, 1);
+                mesh.submit();
+            });
+        } finally {
+            if (previous != null) KuiServices.render().bindWrite(previous, true);
+            Mask.restoreStencilForScratch();
+        }
     }
 
     private static int clamp(int value, int min, int max) {

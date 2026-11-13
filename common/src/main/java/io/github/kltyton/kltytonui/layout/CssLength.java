@@ -159,12 +159,31 @@ public final class CssLength {
     // 编译（解析半段）
     // ------------------------------------------------------------------
 
+    private static final ThreadLocal<Map<String, CssLength>> COMPILED_LENGTHS = ThreadLocal.withInitial(
+            () -> new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, CssLength> eldest) {
+                    return size() > 512;
+                }
+            });
+
     /**
      * 把 CSS 长度串编译成类型化表示。任何输入都返回非 null（不可解析时返回 INVALID，
      * {@link #resolve} 得到 null），因此调用点无需判空。
      */
     public static CssLength parse(String value) {
         if (value == null) return INVALID;
+        if (value.length() > 4096) return parseUncached(value);
+        Map<String, CssLength> cache = COMPILED_LENGTHS.get();
+        CssLength parsed = cache.get(value);
+        if (parsed == null) {
+            parsed = parseUncached(value);
+            cache.put(value, parsed);
+        }
+        return parsed;
+    }
+
+    private static CssLength parseUncached(String value) {
         Double number = parseNumber(value);
         String trimmed = value.trim();
         boolean percent = trimmed.endsWith("%");
@@ -226,13 +245,26 @@ public final class CssLength {
         return percent;
     }
 
+    public boolean dependsOnPercentage() {
+        if (token != null && token.unit == UNIT_PERCENT) return true;
+        if (terms != null && terms.stream().anyMatch(t -> t.unit == UNIT_PERCENT)) return true;
+        return mathArgs != null && java.util.Arrays.stream(mathArgs).anyMatch(CssLength::dependsOnPercentage);
+    }
+
     // ------------------------------------------------------------------
     // 求值（求值半段：实时读取根字号/视口）
     // ------------------------------------------------------------------
 
     /** 用根字号作为 em 基准求值；不可解析返回 null。 */
     public Double resolve(double percentBasis) {
-        return resolve(percentBasis, 0.0d, true, null);
+        return resolve(percentBasis, usesEm() ? Size.getRootFontSize() : Text.DEFAULT_FONT_SIZE, false, null);
+    }
+
+    private boolean usesEm() {
+        if (token != null && token.unit() == UNIT_EM) return true;
+        if (terms != null) for (LengthToken term : terms) if (term.unit() == UNIT_EM) return true;
+        if (mathArgs != null) for (CssLength argument : mathArgs) if (argument.usesEm()) return true;
+        return false;
     }
 
     /** 用显式 em 基准求值；不可解析返回 null。 */

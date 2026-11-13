@@ -7,4 +7,4 @@ McUI 是独立的纯 CSS 主题，遵守[内置主题规范](../../common/src/ma
 
 主题入口是 kltytonui/theme/mcui/mcui.css，字体随主题本地提供。主题本身不依赖 Vue，也不引入浏览器内核。样式表遵守 MPL-2.0；随附的 McUI 字体保留 MIT 归属，许可文件位于同目录。
 
-游戏内打开 kltytonui/theme/mcui/example.html 可查看七页纯 CSS 组件总览。页面只需加载上面的主题 CSS。
+源码仓库中的 `theme/mcui/example.html` 展示七页纯 CSS 组件；可将它复制到自己的资源目录后在游戏内预览。发行 JAR 不包含示例页面。

@@ -41,10 +41,18 @@ public final class ComputedStyleResolver {
             Map.entry("content", "normal"),
             Map.entry("grid-template-columns", "unset"),
             Map.entry("grid-template-rows", "unset"),
-            Map.entry("gap", "0px"),
-            Map.entry("row-gap", "0px"),
-            Map.entry("column-gap", "0px"),
-            Map.entry("justify-items", "stretch"),
+            Map.entry("grid-template-areas", "none"),
+            Map.entry("grid-auto-rows", "auto"),
+            Map.entry("grid-auto-columns", "auto"),
+            Map.entry("grid-auto-flow", "row"),
+            Map.entry("grid-row-start", "auto"),
+            Map.entry("grid-row-end", "auto"),
+            Map.entry("grid-column-start", "auto"),
+            Map.entry("grid-column-end", "auto"),
+            Map.entry("gap", "normal"),
+            Map.entry("row-gap", "normal"),
+            Map.entry("column-gap", "normal"),
+            Map.entry("justify-items", "normal"),
             Map.entry("justify-self", "auto"),
             Map.entry("align-self", "auto"),
             Map.entry("grid-row", "auto"),
@@ -111,8 +119,8 @@ public final class ComputedStyleResolver {
             Map.entry("flex-direction", "row"),
             Map.entry("flex-wrap", "nowrap"),
             Map.entry("align-content", "stretch"),
-            Map.entry("justify-content", "flex-start"),
-            Map.entry("align-items", "stretch"),
+            Map.entry("justify-content", "normal"),
+            Map.entry("align-items", "normal"),
             Map.entry("flex", "0 1 auto"),
             Map.entry("flex-grow", "0"),
             Map.entry("flex-shrink", "1"),
@@ -127,6 +135,10 @@ public final class ComputedStyleResolver {
             Map.entry("pointer-events", "auto"),
             Map.entry("visibility", "visible"),
             Map.entry("transition", "none"),
+            Map.entry("transition-property", "all"),
+            Map.entry("transition-duration", "0s"),
+            Map.entry("transition-delay", "0s"),
+            Map.entry("transition-timing-function", "ease"),
             Map.entry("transform", "none"),
             Map.entry("transform-origin", "50% 50%"),
             Map.entry("transform-style", "flat"),
@@ -165,57 +177,106 @@ public final class ComputedStyleResolver {
         finalize(style, host, host == null ? null : host.getComputedStyle());
     }
 
-    private static void finalize(Style style, Element context, Style parentStyle) {
-        for (int i = 0; i < Style.STYLE_FIELDS.length; i++) {
-            Field field = Style.STYLE_FIELDS[i];
-            try {
-                String current = (String) field.get(style);
-                String cssName = Style.STYLE_FIELD_CSS_NAMES[i];
-                String resolved = resolveCssWideKeyword(cssName, current, parentStyle);
-                if ("color".equals(cssName) && "currentcolor".equalsIgnoreCase(resolved)) {
-                    resolved = inheritOrInitial(cssName, parentStyle);
-                }
-                if ("display".equals(cssName)) {
-                    resolved = blockifyDisplay(normalizeDisplay(resolved), parentStyle);
-                }
-                if ("mix-blend-mode".equals(cssName)) {
-                    // Unknown identifiers are invalid CSS values and compute to normal.
-                    resolved = CssBlendMode.normalize(resolved);
-                } else if ("isolation".equals(cssName)) {
-                    resolved = normalizeIsolation(resolved);
-                }
-                field.set(style, resolved);
-            } catch (IllegalAccessException ignored) {
+    private record Property(int index, String cssName, String initial, boolean inherited, int special) { }
+
+    private static final class Metadata {
+        private static final Property[] PROPERTIES = createProperties();
+
+        private static Property[] createProperties() {
+            Property[] properties = new Property[Style.STYLE_FIELDS.length];
+            for (int i = 0; i < properties.length; i++) {
+                String name = Style.STYLE_FIELD_CSS_NAMES[i];
+                int special = switch (name) {
+                    case "display" -> 1;
+                    case "mix-blend-mode" -> 2;
+                    case "isolation" -> 3;
+                    case "image-rendering" -> 4;
+                    case "color" -> 5;
+                    default -> 0;
+                };
+                properties[i] = new Property(i, name, initialValue(name),
+                        Style.INHERITED_PROPERTIES.contains(name), special);
             }
+            return properties;
+        }
+    }
+
+    private static void finalize(Style style, Element context, Style parentStyle) {
+        for (Property property : Metadata.PROPERTIES) {
+            String current = Style.readField(style, property.index);
+            String resolved = resolveCssWideKeyword(property, current, parentStyle);
+            resolved = switch (property.special) {
+                case 1 -> blockifyDisplay(normalizeDisplay(resolved), parentStyle);
+                case 2 -> CssBlendMode.normalize(resolved);
+                case 3 -> normalizeIsolation(resolved);
+                case 4 -> normalizeImageRendering(resolved, parentStyle);
+                case 5 -> "currentcolor".equalsIgnoreCase(resolved)
+                        ? inheritOrInitial(property.cssName, parentStyle) : resolved;
+                default -> resolved;
+            };
+            if (resolved != current) Style.writeField(style, property.index, resolved);
         }
         finalizeAnimationValues(style);
-        applyTableRowDefaults(style, context);
+        finalizeTransitionValues(style);
     }
 
-    private static String resolveCssWideKeyword(String cssName, String current, Style parentStyle) {
-        if (current == null || current.isBlank()) {
-            return initialValue(cssName);
+    private static void finalizeTransitionValues(Style style) {
+        if ("none".equals(style.transitionProperty)
+                || ("all".equals(style.transitionProperty) && "0s".equals(style.transitionDuration)
+                && "0s".equals(style.transitionDelay))) {
+            style.transition = "none";
+            return;
         }
-        String normalized = current.trim().toLowerCase(Locale.ROOT);
-        if (!ShorthandParser.isCssWideKeyword(normalized)) {
-            return current;
+        var properties = Background.splitTopLevelComma(style.transitionProperty);
+        var durations = Background.splitTopLevelComma(style.transitionDuration);
+        var delays = Background.splitTopLevelComma(style.transitionDelay);
+        var timings = Background.splitTopLevelComma(style.transitionTimingFunction);
+        if (properties.isEmpty() || durations.isEmpty() || delays.isEmpty() || timings.isEmpty()) {
+            style.transition = "none";
+            return;
         }
-        if ("inherit".equals(normalized)) {
-            return inheritOrInitial(cssName, parentStyle);
+        var parts = new java.util.ArrayList<String>();
+        for (int i = 0; i < properties.size(); i++) {
+            parts.add(properties.get(i) + " " + durations.get(i % durations.size()) + " "
+                    + timings.get(i % timings.size()) + " " + delays.get(i % delays.size()));
         }
-        if ("initial".equals(normalized)) {
-            return initialValue(cssName);
-        }
-        if ("revert".equals(normalized) || "revert-layer".equals(normalized)) {
-            // The engine currently has one author origin and no cascade layers,
-            // so both keywords use the defined inherited/initial fallback here.
-            return isInheritedProperty(cssName) ? inheritOrInitial(cssName, parentStyle) : initialValue(cssName);
-        }
-        return isInheritedProperty(cssName) ? inheritOrInitial(cssName, parentStyle) : initialValue(cssName);
+        style.transition = String.join(", ", parts);
     }
 
-    private static boolean isInheritedProperty(String cssName) {
-        return Style.INHERITED_PROPERTIES.contains(cssName);
+    private static String resolveCssWideKeyword(Property property, String current, Style parentStyle) {
+        if (current == null || current.isBlank()) return property.initial;
+        int keyword = cssWideKeyword(current);
+        if (keyword == 0) return current;
+        if (keyword == 2) return property.initial;
+        if ((keyword == 1 || property.inherited) && parentStyle != null) {
+            String inherited = parentStyle.get(property.cssName);
+            if (inherited != null && !inherited.isBlank() && !"inherit".equalsIgnoreCase(inherited)) return inherited;
+        }
+        return property.initial;
+    }
+
+    private static int cssWideKeyword(String value) {
+        int start = 0, end = value.length();
+        while (start < end && value.charAt(start) <= ' ') start++;
+        while (end > start && value.charAt(end - 1) <= ' ') end--;
+        return switch (end - start) {
+            case 5 -> matchesKeyword(value, start, end, "unset") ? 3 : 0;
+            case 6 -> matchesKeyword(value, start, end, "revert") ? 3 : 0;
+            case 7 -> matchesKeyword(value, start, end, "inherit") ? 1
+                    : matchesKeyword(value, start, end, "initial") ? 2 : 0;
+            case 12 -> matchesKeyword(value, start, end, "revert-layer") ? 3 : 0;
+            default -> 0;
+        };
+    }
+
+    private static boolean matchesKeyword(String value, int start, int end, String keyword) {
+        for (int i = start; i < end; i++) {
+            char c = value.charAt(i);
+            if (c > 127) return value.substring(start, end).toLowerCase(Locale.ROOT).equals(keyword);
+            if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (c != keyword.charAt(i - start)) return false;
+        }
+        return true;
     }
 
     private static String inheritOrInitial(String cssName, Style parentStyle) {
@@ -237,32 +298,12 @@ public final class ComputedStyleResolver {
         String value = raw.trim().toLowerCase(Locale.ROOT);
         return switch (value) {
             case "block", "inline", "inline-block", "flex", "inline-flex", "grid", "inline-grid", "none" -> value;
-            case "table", "table-header-group", "table-row-group", "table-footer-group",
-                 "table-cell", "table-caption", "list-item", "flow-root" -> "block";
-            case "table-row" -> "grid";
+            case "table", "table-header-group", "table-footer-group", "table-row-group", "table-row", "table-cell" ->
+                    value;
+            case "list-item", "flow-root" -> "block";
             case "inline-table" -> "inline-block";
             default -> "block";
         };
-    }
-
-    private static void applyTableRowDefaults(Style style, Element context) {
-        if (style == null || context == null || context.tagName == null) return;
-        if (!"TR".equalsIgnoreCase(context.tagName) || !"grid".equals(style.display)) return;
-        if (style.gridTemplateColumns != null
-                && !style.gridTemplateColumns.isBlank()
-                && !"unset".equalsIgnoreCase(style.gridTemplateColumns)
-                && !"auto".equalsIgnoreCase(style.gridTemplateColumns)) {
-            return;
-        }
-        int columns = 0;
-        for (Element child : context.children) {
-            if (child == null || child.tagName == null) continue;
-            String tag = child.tagName.trim().toUpperCase(Locale.ROOT);
-            if ("TH".equals(tag) || "TD".equals(tag)) columns++;
-        }
-        if (columns > 0) {
-            style.gridTemplateColumns = "repeat(" + columns + ", minmax(0, 1fr))";
-        }
     }
 
     /**
@@ -287,8 +328,19 @@ public final class ComputedStyleResolver {
             case "inline", "inline-block" -> "block";
             case "inline-flex" -> "flex";
             case "inline-grid" -> "grid";
+            case "table-header-group", "table-footer-group", "table-row-group", "table-row", "table-cell" -> "block";
             default -> display;
         };
+    }
+
+    private static String normalizeImageRendering(String raw, Style parentStyle) {
+        String keyword = ImageRendering.keyword(raw);
+        if (keyword != null) return keyword;
+        if (parentStyle != null) {
+            String inherited = parentStyle.imageRendering;
+            if (inherited != null && !inherited.isBlank() && !"unset".equals(inherited)) return inherited;
+        }
+        return initialValue("image-rendering");
     }
 
     private static String normalizeIsolation(String raw) {

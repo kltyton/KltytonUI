@@ -29,6 +29,26 @@ import io.github.kltyton.kltytonui.render.CssBlendMode;
 
 public class RenderElement {
     private final Element element;
+    private String rootFontMemoDeclaration;
+    private double rootFontMemoWidth;
+    private double rootFontMemoHeight;
+    private Double rootFontMemoValue;
+    private boolean rootFontMemoValid;
+
+    public synchronized boolean hasRootFontMemo(String declaration, double width, double height) {
+        return rootFontMemoValid && Objects.equals(rootFontMemoDeclaration, declaration)
+                && rootFontMemoWidth == width && rootFontMemoHeight == height;
+    }
+
+    public synchronized Double getRootFontMemoValue() { return rootFontMemoValue; }
+
+    public synchronized void setRootFontMemo(String declaration, double width, double height, Double value) {
+        rootFontMemoDeclaration = declaration;
+        rootFontMemoWidth = width;
+        rootFontMemoHeight = height;
+        rootFontMemoValue = value;
+        rootFontMemoValid = true;
+    }
     public Cache<Element[]> route = new Cache<>() {
         @Override
         public void expandClear() {
@@ -50,9 +70,34 @@ public class RenderElement {
         }
     };
     public Cache<Style> computedStyle = new Cache<>();
+    public Cache<Text> naturalText = new Cache<>() {
+        private long layoutDependency;
+        private long textDependency;
+        private long fontRevision;
+        private double rootFontSize;
+
+        @Override public Text get() {
+            if (value != null && (layoutDependency != element.getRenderer().layoutDependency()
+                    || textDependency != element.getRenderer().textDependency()
+                    || fontRevision != io.github.kltyton.kltytonui.resource.Font.getMetricsRevision()
+                    || rootFontSize != Size.getRootFontSize(element.document))) value = null;
+            return value;
+        }
+        @Override public void set(Text value) {
+            this.value = value;
+            layoutDependency = element.getRenderer().layoutDependency();
+            textDependency = element.getRenderer().textDependency();
+            fontRevision = io.github.kltyton.kltytonui.resource.Font.getMetricsRevision();
+            rootFontSize = Size.getRootFontSize(element.document);
+        }
+        @Override public void expandClear() {
+            element.children.forEach(child -> child.getRenderer().naturalText.clear());
+        }
+    };
     public Cache<Text> text = new Cache<>() {
         @Override
         public void expandClear() {
+            naturalText.clear();
             element.children.forEach(e -> e.getRenderer().text.clear());
         }
     };
@@ -98,6 +143,23 @@ public class RenderElement {
         }
     };
     public Cache<Position> position = new Cache<>() {
+        private long dependency;
+
+        @Override
+        public Position get() {
+            if (value != null && dependency != usedSizeDependency()) {
+                value = null;
+                clearCommittedLayout();
+            }
+            return value;
+        }
+
+        @Override
+        public void set(Position value) {
+            this.value = value;
+            dependency = usedSizeDependency();
+        }
+
         @Override
         public void expandClear() {
             clearCommittedLayout();
@@ -119,6 +181,7 @@ public class RenderElement {
      * computed style 逐值校验，关键字相同则内容必然相同（Flex 构造后不可变）。
      */
     public io.github.kltyton.kltytonui.layout.Flex flexCache = null;
+    public io.github.kltyton.kltytonui.layout.Grid gridCache = null;
     // resolveOwnExplicitContentHeight 的按 layoutDependency 验证的记忆：结果恒 >= 0
     // 或 null，NaN 表示"结果为 null"，memoDep 不等表示无记忆。高度解析沿祖先链
     // 递归，逐层装箱 Double（JFR 归因约 107MB）；记忆把整条链摊成每层一次。
@@ -203,6 +266,21 @@ public class RenderElement {
         layoutVersion++;
     }
 
+    public void invalidateLayoutAncestors() {
+        for (Element current = element; current != null; current = current.parentElement) {
+            RenderElement renderer = current.getRenderer();
+            renderer.invalidateLayoutVersion();
+            renderer.size.value = null;
+            renderer.box.value = null;
+            renderer.position.value = null;
+            renderer.clearCommittedLayout();
+            // Out-of-flow boxes cannot change their ancestors' intrinsic size.
+            // Do not resolve styles while a DOM subtree is still being constructed.
+            Style style = renderer.computedStyle.get();
+            if (style != null && ("absolute".equals(style.position) || "fixed".equals(style.position))) break;
+        }
+    }
+
     /**
      * Version of all geometry inputs that can affect this element's used size.
      * Layout caches use this stamp instead of requiring every mutation path to
@@ -242,11 +320,17 @@ public class RenderElement {
         return value;
     }
 
-    /**
-     * Invalidates cached used values whose containing block may have changed.
-     * Descendant percentages, flex/grid assignments, text wrapping and
-     * percentage transforms all depend on ancestor geometry.
-     */
+    /** Clears one node; callers traversing a subtree must not recursively clear it again. */
+    public void clearLocalLayoutCaches() {
+        layoutVersion++;
+        text.value = null;
+        wrappedText.value = null;
+        size.value = null;
+        box.value = null;
+        position.value = null;
+        clearCommittedLayout();
+    }
+
     public void invalidateLayoutSubtree() {
         ArrayDeque<Element> stack = new ArrayDeque<>();
         stack.push(element);
@@ -397,14 +481,7 @@ public class RenderElement {
         }
     }
 
-    /**
-     * 本元素已用尺寸变化后，丢弃子项的位置缓存。
-     *
-     * <p>{@code position} 缓存不带依赖戳，只靠显式 {@code clear()} 失效；而 Grid/Flex/百分比
-     * 子项的位置由父级分配，父级尺寸由依赖戳判定为过期时并不会经过样式失效路径，
-     * 于是子项会一直停在旧轨道上。这里只清一层：更深的子项由它们自己父级的尺寸变化
-     * 递归处理（尺寸变化会沿树向下逐层触发本方法）。</p>
-     */
+    /** Clears assigned child positions when a parent's used size changes during measurement. */
     static void invalidateChildrenPositions(Element element) {
         if (element == null) return;
         List<Element> children = element.children;
@@ -421,7 +498,9 @@ public class RenderElement {
             "boxSizing",
             "margin", "marginTop", "marginBottom", "marginLeft", "marginRight",
             "flexDirection", "flexWrap", "alignContent", "justifyContent", "alignItems", "order",
-            "gridTemplateColumns", "gridTemplateRows",
+            "gridTemplateColumns", "gridTemplateRows", "gridTemplateAreas",
+            "gridAutoRows", "gridAutoColumns", "gridAutoFlow",
+            "gridRowStart", "gridRowEnd", "gridColumnStart", "gridColumnEnd", "gridArea",
             "gap", "rowGap", "columnGap",
             "scrollbarWidth",
             "justifyItems",
@@ -444,6 +523,8 @@ public class RenderElement {
 
     private static final Set<String> VISUAL_BOX_PROPS = Set.of(
             "color", "visibility", "opacity", "dynamicRangeLimit", "mixBlendMode", "isolation",
+            "fill", "fillOpacity", "fillRule", "stroke", "strokeWidth", "strokeOpacity",
+            "strokeLinecap", "strokeLinejoin", "shapeRendering", "imageRendering",
             "borderRadius",
             "boxShadow",
             "backgroundColor", "backgroundImage", "backgroundRepeat", "backgroundSize", "backgroundPosition",
@@ -465,7 +546,7 @@ public class RenderElement {
     private static final Set<String> TEXT_LAYOUT_PROPS = Set.of(
             "fontSize", "lineHeight", "fontFamily", "fontWeight", "fontStyle", "textStroke",
             "direction", "letterSpacing", "textAlign", "verticalAlign", "textIndent", "whiteSpace", "wordBreak", "textOverflow",
-            "lineClamp"
+            "lineClamp", "textTransform"
     );
 
     private static final Set<String> STRUCTURAL_PROPS = Set.of(
@@ -487,6 +568,11 @@ public class RenderElement {
      * 自己的布局子树，所以要把脏位拿出来看。
      */
     public static int observeStyleMask(Element element, Style origin, Style current) {
+        return observeStyleMask(element, origin, current, false);
+    }
+
+    public static int observeStyleMask(Element element, Style origin, Style current,
+                                       boolean deferOutOfFlowPseudoLayout) {
         int dirtyMask = 0;
 
         Predicate<Set<String>> check = set -> {
@@ -589,13 +675,9 @@ public class RenderElement {
 
             if (check.test(TEXT_LAYOUT_PROPS)) {
                 // 字体大小行高变化触发重排
-                element.forEachRoute(routeElement -> {
-                    RenderElement routeRenderer = routeElement.getRenderer();
-                    routeRenderer.invalidateLayoutVersion();
-                    routeRenderer.size.clear();
-                });
+                renderer.invalidateLayoutAncestors();
                 renderer.box.clear();
-                if (element.parentElement != null) {
+                if ((origin.isInFlow() || current.isInFlow()) && element.parentElement != null) {
                     element.parentElement.getRenderer().size.clear();
                     element.parentElement.children.forEach(sibling -> sibling.getRenderer().position.clear());
                 } else renderer.position.clear();
@@ -643,7 +725,7 @@ public class RenderElement {
         } else if (layoutChanged) {
             element.forEachRoute(e -> e.getRenderer().size.clear());
             renderer.box.clear();
-            if (element.parentElement != null) {
+            if ((origin.isInFlow() || current.isInFlow()) && element.parentElement != null) {
                 element.parentElement.getRenderer().size.clear();
                 element.parentElement.children.forEach(sibling -> sibling.getRenderer().position.clear());
             } else renderer.position.clear();
@@ -653,6 +735,10 @@ public class RenderElement {
 
         if (paddingChanged || borderGeometryChanged || layoutChanged) {
             renderer.invalidateLayoutSubtree();
+        }
+
+        if (!Objects.equals(origin.position, current.position) && element.parentElement != null) {
+            element.parentElement.getRenderer().invalidateLayoutAncestors();
         }
 
         if (!origin.display.equals(current.display)) {
@@ -666,6 +752,12 @@ public class RenderElement {
         if (check.test(BACKGROUND_PROPS)) {
             renderer.background.clear();
             renderer.invalidateStyleVersion();
+            dirtyMask |= Drawer.REPAINT;
+        }
+
+        if (!Objects.equals(origin.color, current.color)) {
+            renderer.background.clear();
+            renderer.maskLayers.clear();
             dirtyMask |= Drawer.REPAINT;
         }
 
@@ -698,8 +790,10 @@ public class RenderElement {
             dirtyMask |= Drawer.REORDER;
         }
 
-        if (dirtyMask != 0 && element.document != null) {
-            element.document.markDirty(element, dirtyMask);
+        int committedDirtyMask = deferOutOfFlowPseudoLayout
+                ? dirtyMask & ~Drawer.RELAYOUT : dirtyMask;
+        if (committedDirtyMask != 0 && element.document != null) {
+            element.document.markDirty(element, committedDirtyMask);
         }
         return dirtyMask;
     }

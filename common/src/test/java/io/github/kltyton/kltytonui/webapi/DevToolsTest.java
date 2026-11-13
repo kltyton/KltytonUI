@@ -233,7 +233,9 @@ class DevToolsTest {
             assertTrue(tool.querySelector("#domTree").getTextContent().contains("</p>"));
             assertFalse(tool.querySelector("#domTree").getTextContent().contains("\"Middle\""));
             toggleTreeNode(tool, strong);
-            String treeText = tool.querySelector("#domTree").getTextContent();
+            String treeText = tool.querySelectorAll("#domTree .dom-node").stream()
+                    .sorted(java.util.Comparator.comparingDouble(row -> row.getBoundingClientRect().y))
+                    .map(Element::getTextContent).collect(java.util.stream.Collectors.joining());
             int beforeIndex = treeText.indexOf("\"Before\"");
             int strongIndex = treeText.indexOf("<strong");
             int middleIndex = treeText.indexOf("\"Middle\"");
@@ -386,6 +388,12 @@ class DevToolsTest {
             bodyTreeRow.dispatchEvent(new Event(bodyTreeRow, "mouseleave", false));
             assertFalse(highlight.getClassNames().contains("show"));
 
+            Element treeViewport = tool.querySelector("#domTree");
+            treeViewport.scrollTop = treeViewport.getTargetScrollTop();
+            for (int frame = 0; frame < 16; frame++) {
+                FrameTaskScheduler.tick();
+                commitTool(tool);
+            }
             Element closingBodyTreeRow = closingTreeRow(tool, target.body);
             assertNotNull(closingBodyTreeRow);
             closingBodyTreeRow.dispatchEvent(new Event(closingBodyTreeRow, "mouseenter", false));
@@ -446,7 +454,7 @@ class DevToolsTest {
     }
 
     @Test
-    void largeDocumentInitiallyMaterializesOnlyBodyChildren() throws Exception {
+    void largeDocumentOnlyMaterializesVisibleBodyChildren() throws Exception {
         Size.setViewportOverride(1600, 900);
         String targetPath = "test://devtools-large-target";
         HTML.putTemple(DevToolsController.PATH, Files.readString(TEMPLATE));
@@ -469,14 +477,15 @@ class DevToolsTest {
             assertTrue(DevTools.selectDocument(target));
             Document tool = DevTools.getToolDocument();
             assertNotNull(tool);
-            assertEquals(203, tool.querySelectorAll("#domTree .dom-node[data-node-id]").size());
+            assertTrue(tool.querySelectorAll("#domTree .dom-node[data-node-id]").size() < 50);
+            assertNull(treeRow(tool, target.body.children.get(199)));
             Element firstSection = target.body.children.get(0);
             assertNotNull(treeRow(tool, firstSection));
             assertTrue(treeRow(tool, firstSection.children.get(0)) == null);
 
             toggleTreeNode(tool, firstSection);
             assertNotNull(treeRow(tool, firstSection.children.get(0)));
-            assertEquals(213, tool.querySelectorAll("#domTree .dom-node[data-node-id]").size());
+            assertTrue(tool.querySelectorAll("#domTree .dom-node[data-node-id]").size() < 50);
         } finally {
             if (DevTools.isOpen()) DevTools.toggle();
             target.remove();
@@ -507,6 +516,10 @@ class DevToolsTest {
         Element toggle = row.querySelector(".dom-toggle");
         assertNotNull(toggle);
         toggle.click();
+        for (int frame = 0; frame < 16; frame++) {
+            FrameTaskScheduler.tick();
+            commitTool(tool);
+        }
     }
 
     /**
@@ -582,8 +595,13 @@ class DevToolsTest {
     }
 
     private static void commitTool(Document tool) {
+        tool.commitStyleRecalc();
         tool.markDirty(tool.body, Drawer.RELAYOUT | Drawer.REPAINT | Drawer.REORDER | Drawer.HITTEST);
         tool.commitRenderState();
+        if (DevTools.prepareRender(tool)) {
+            tool.commitPendingStyleRecalcForRender();
+            tool.commitRenderState();
+        }
     }
 
     private static void dragHorizontally(Document document, Element handle, double deltaX) {

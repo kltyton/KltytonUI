@@ -231,8 +231,16 @@ public class Position {
                 containerW = Math.max(0, cbSize.width() - cbBox.getBorderHorizontal());
                 containerH = Math.max(0, cbSize.height() - cbBox.getBorderVertical());
                 Position shift = containingBlockShift(element, containingBlock);
-                originX = cbBox.getBorderLeft() + shift.x;
-                originY = cbBox.getBorderTop() + shift.y;
+                Layout.ContainingArea area = Layout.containingArea(element, containingBlock);
+                if (area != null) {
+                    containerW = area.width();
+                    containerH = area.height();
+                    originX = area.x() + shift.x;
+                    originY = area.y() + shift.y;
+                } else {
+                    originX = cbBox.getBorderLeft() + shift.x;
+                    originY = cbBox.getBorderTop() + shift.y;
+                }
             } else {
                 // 初始包含块：文档视口（随内容滚动，区别于 fixed）
                 Size window = viewportContainingBlockSize(element);
@@ -248,6 +256,12 @@ public class Position {
         boolean hasRight = isSet(style.right);
         boolean hasTop = isSet(style.top);
         boolean hasBottom = isSet(style.bottom);
+        Element parent = element.parentElement;
+        if (!hasLeft && !hasRight && !hasTop && !hasBottom && parent != null
+                && !parent.getComputedStyle().isFlexDisplay() && !parent.getComputedStyle().isGridDisplay()
+                && "block".equals(style.display)) {
+            return NormalFlow.computeStaticBlockPosition(element);
+        }
 
         double x = 0;
         double y = 0;

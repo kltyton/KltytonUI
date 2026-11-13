@@ -12,6 +12,21 @@ import io.github.kltyton.kltytonui.init.Node;
  */
 public final class ForgeDocumentExpander implements DocumentExpander {
     @Override
+    public boolean applyAndReportChanges(Document document) {
+        for (var element : document.getElements()) {
+            if (element instanceof io.github.kltyton.kltytonui.element.Container
+                    || element instanceof io.github.kltyton.kltytonui.element.Recipe
+                    || element instanceof io.github.kltyton.kltytonui.element.Slot
+                    || element instanceof io.github.kltyton.kltytonui.element.Item
+                    || element instanceof io.github.kltyton.kltytonui.element.Ingredient) {
+                apply(document);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public void apply(Document document) {
         if (document == null) return;
         String templatePath = document.getPath();
@@ -30,6 +45,14 @@ public final class ForgeDocumentExpander implements DocumentExpander {
         } catch (Exception e) {
             KltytonUI.LOGGER.warn("RecipeExpander failed, template={}", templatePath, e);
         }
+    }
+
+    @Override
+    public boolean supportsInnerHtmlBatch(Document document, Node parent) {
+        return parent instanceof io.github.kltyton.kltytonui.init.Element
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Slot)
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Ingredient)
+                && !(parent instanceof io.github.kltyton.kltytonui.element.Item);
     }
 
     @Override

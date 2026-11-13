@@ -27,7 +27,7 @@ public abstract class AbstractContainerScreenMixin {
 
     @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
     private void kltytonui$cancelVanillaRenderSlot(PoseStack p_281607_, Slot p_282613_, CallbackInfo ci) {
-        if ((Object) this instanceof KltytonContainerScreen screen) {
+        if ((Object) this instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             if (screen.pruneInvalidQuickCraftSlot(p_282613_)) {
                 kltytonui$recalculateQuickCraftRemaining();
             }
@@ -40,7 +40,7 @@ public abstract class AbstractContainerScreenMixin {
     // cannot map it — so remap must stay off for this injector.
     @Inject(method = "renderSlotHighlight(Lcom/mojang/blaze3d/vertex/PoseStack;IIII)V", at = @At("HEAD"), cancellable = true, remap = false)
     private static void kltytonui$cancelVanillaSlotHighlightLegacy(CallbackInfo ci) {
-        if (Minecraft.getInstance().screen instanceof KltytonContainerScreen) {
+        if (Minecraft.getInstance().screen instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             ci.cancel();
         }
     }
@@ -57,7 +57,7 @@ public abstract class AbstractContainerScreenMixin {
             String p_282568_,
             CallbackInfo ci
     ) {
-        if ((Object) this instanceof KltytonContainerScreen screen) {
+        if ((Object) this instanceof KltytonContainerScreen<?> screen && screen.usesKltytonMenu()) {
             screen.captureFloatingItem(p_281330_, p_281772_, p_281689_, p_282568_);
             ci.cancel();
         }
@@ -65,7 +65,7 @@ public abstract class AbstractContainerScreenMixin {
 
     @Inject(method = "isHovering(Lnet/minecraft/world/inventory/Slot;DD)Z", at = @At("HEAD"), cancellable = true)
     private void kltytonui$injectSlotHovering(Slot p_97775_, double p_97776_, double p_97777_, CallbackInfoReturnable<Boolean> cir) {
-        if (!((Object) this instanceof KltytonContainerScreen screen)) {
+        if (!((Object) this instanceof KltytonContainerScreen<?> screen) || !screen.usesKltytonMenu()) {
             return;
         }
         if (!screen.isSlotPointerInteractable(p_97775_)) {

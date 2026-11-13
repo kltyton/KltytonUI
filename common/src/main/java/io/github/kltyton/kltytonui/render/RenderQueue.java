@@ -86,7 +86,8 @@ public final class RenderQueue {
 
     public boolean commit(boolean commitLayoutNow) {
         boolean hadWork = globalDirtyMask != 0 || !dirtyElements.isEmpty() || layoutCommitDirty;
-        boolean hadGlobalDirty = globalDirtyMask != 0;
+        boolean hadGlobalDirty = (globalDirtyMask & (Drawer.REORDER | Drawer.RELAYOUT
+                | Drawer.COMMIT_LAYOUT | Drawer.HITTEST)) != 0;
         boolean globalGeometryDirty = (globalDirtyMask & (Drawer.RELAYOUT | Drawer.COMMIT_LAYOUT)) != 0;
         boolean needsLayoutCommit = layoutCommitDirty || globalGeometryDirty;
         // A relayout ripples through ancestors and following siblings, and a paint
@@ -106,7 +107,13 @@ public final class RenderQueue {
                 needsLayoutCommit = true;
             }
             if (element.hasDirtyFlag(Drawer.RELAYOUT)) {
-                needsFullLayoutCommit = true;
+                Element isolated = isolatedLayoutRoot(element);
+                if (isolated == null) {
+                    needsFullLayoutCommit = true;
+                } else {
+                    if (transformRoots == null) transformRoots = Collections.newSetFromMap(new IdentityHashMap<>());
+                    transformRoots.add(isolated);
+                }
                 incrementalHitRoots.add(element.parentElement == null ? element : element.parentElement);
             } else if (element.hasDirtyFlag(Drawer.COMMIT_LAYOUT)) {
                 // Transform or out-of-flow geometry changes affect this subtree.
@@ -127,6 +134,9 @@ public final class RenderQueue {
         }
         styleTransformRoots = needsFullLayoutCommit ? null : transformRoots;
 
+        if (needsLayoutCommit && !commitLayoutNow && owner.isInitialCommitSlicing()) {
+            owner.endInitialCommitSlice();
+        }
         applyGlobalDirty();
         Drawer.flushUpdates(owner);
         if (needsLayoutCommit && commitLayoutNow) {
@@ -173,6 +183,16 @@ public final class RenderQueue {
         Set<Element> roots = styleTransformRoots;
         styleTransformRoots = null;
         return roots;
+    }
+
+    private Element isolatedLayoutRoot(Element element) {
+        for (Element current = element; current != null; current = current.parentElement) {
+            String position = current.getRawComputedStyle().position;
+            if (!"absolute".equals(position) && !"fixed".equals(position)) continue;
+            Element parent = current.parentElement;
+            return parent != null && parent.getRenderer().getCommittedRectIfValid() != null ? current : null;
+        }
+        return null;
     }
 
     public void markDirty(int mask) {

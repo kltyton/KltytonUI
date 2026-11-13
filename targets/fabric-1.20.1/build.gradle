@@ -61,7 +61,6 @@ tasks.named('sourcesJar', Jar).configure { dependsOn 'prepareCommonSources' }
 repositories {
     mavenCentral()
     maven { url = 'https://www.cursemaven.com' }
-    maven { url = 'https://maven.latvian.dev/releases' }
 }
 
 dependencies {
@@ -70,9 +69,6 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
 
-    // Required pure-Java page runtime; KubeJS remains optional.
-    modImplementation "curse.maven:rhino-416294:${rhino_fabric_file}"
-
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
@@ -80,7 +76,6 @@ dependencies {
 
 tasks.named('processResources', ProcessResources).configure {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: fabric_minecraft_version,
             fabric_loader_version: fabric_loader_version,
@@ -107,4 +102,5 @@ tasks.named('test', Test).configure {
     useJUnitPlatform()
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

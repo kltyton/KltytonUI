@@ -87,6 +87,8 @@ public class FontDrawer {
      */
     private static final ThreadLocal<java.util.ArrayDeque<Double>> PIXEL_SCALE_STACK =
             ThreadLocal.withInitial(java.util.ArrayDeque::new);
+    private static final ThreadLocal<java.util.ArrayDeque<Boolean>> PAINT_COMPLETENESS =
+            ThreadLocal.withInitial(java.util.ArrayDeque::new);
 
     public static void pushDocumentPixelScale(double scale) {
         double safe = scale > 0 && Double.isFinite(scale) ? scale : 1.0d;
@@ -159,31 +161,37 @@ public class FontDrawer {
         String content = text.content;
         if (content == null || content.isEmpty()) return;
 
-        List<Text.TextShadow> shadows = text.usesDefaultFont()
-                ? List.of() : text.textShadows;
-        if (shadows != null && !shadows.isEmpty()) {
-            Color previousColor = text.color;
-            int currentColor = previousColor == null ? 0xFFFFFFFF : previousColor.getValue();
-            try {
-                for (Text.TextShadow shadow : shadows) {
-                    text.color = new Color(shadow.resolveColor(currentColor));
-                    drawContent(poseStack, text, content,
-                            new Position(position.x + shadow.offsetX(), position.y + shadow.offsetY()), baselineOffset);
+        boolean nativeFont = text.usesDefaultFont();
+        if (nativeFont) Base.commitDraws();
+        try {
+            List<Text.TextShadow> shadows = text.usesDefaultFont()
+                    ? List.of() : text.textShadows;
+            if (shadows != null && !shadows.isEmpty()) {
+                Color previousColor = text.color;
+                int currentColor = previousColor == null ? 0xFFFFFFFF : previousColor.getValue();
+                try {
+                    for (Text.TextShadow shadow : shadows) {
+                        text.color = new Color(shadow.resolveColor(currentColor));
+                        drawContent(poseStack, text, content,
+                                new Position(position.x + shadow.offsetX(), position.y + shadow.offsetY()), baselineOffset);
+                    }
+                } finally {
+                    text.color = previousColor;
                 }
-            } finally {
-                text.color = previousColor;
+            } else if (text.shadow != null) {
+                Color previousColor = text.color;
+                text.color = text.shadow.color();
+                try {
+                    drawContent(poseStack, text, content,
+                            new Position(position.x + text.shadow.offsetX(), position.y + text.shadow.offsetY()), baselineOffset);
+                } finally {
+                    text.color = previousColor;
+                }
             }
-        } else if (text.shadow != null) {
-            Color previousColor = text.color;
-            text.color = text.shadow.color();
-            try {
-                drawContent(poseStack, text, content,
-                        new Position(position.x + text.shadow.offsetX(), position.y + text.shadow.offsetY()), baselineOffset);
-            } finally {
-                text.color = previousColor;
-            }
+            drawContent(poseStack, text, content, position, baselineOffset);
+        } finally {
+            if (nativeFont) Base.commitDraws();
         }
-        drawContent(poseStack, text, content, position, baselineOffset);
     }
 
     private static void drawContent(PoseStack poseStack, Text text, String content, Position position, double baselineOffset) {
@@ -298,6 +306,25 @@ public class FontDrawer {
         }
     }
 
+    public static void beginPaintCompletenessTracking() {
+        PAINT_COMPLETENESS.get().push(Boolean.TRUE);
+    }
+
+    public static void markPaintIncomplete() {
+        java.util.ArrayDeque<Boolean> stack = PAINT_COMPLETENESS.get();
+        if (stack.isEmpty()) return;
+        stack.pop();
+        stack.push(Boolean.FALSE);
+    }
+
+    public static boolean endPaintCompletenessTracking() {
+        java.util.ArrayDeque<Boolean> stack = PAINT_COMPLETENESS.get();
+        if (stack.isEmpty()) return false;
+        boolean complete = stack.pop();
+        if (stack.isEmpty()) PAINT_COMPLETENESS.remove();
+        return complete;
+    }
+
     /**
      * 一行自定义字体文本：先算每个码点的字形与落点，再按「描边 → 填充 → 装饰线」三层绘制。
      * 三层都用白色字形/白色块 + 顶点染色，颜色变化不触发任何重新光栅。
@@ -339,7 +366,12 @@ public class FontDrawer {
                 int cp = runText.codePointAt(offset);
                 GlyphCache.Glyph fill = GlyphCache.entry(run.font(), cp, 0);
                 fills[index] = fill;
-                if (strokes != null) strokes[index] = GlyphCache.entry(run.font(), cp, strokeRaster);
+                GlyphCache.Glyph stroke = strokes == null ? null : GlyphCache.entry(run.font(), cp, strokeRaster);
+                if (strokes != null) strokes[index] = stroke;
+                if ((fill != null && fill.hasInk && !fill.drawable())
+                        || (stroke != null && stroke.hasInk && !stroke.drawable())) {
+                    markPaintIncomplete();
+                }
                 penX[index] = cursor;
                 index++;
                 if (fill != null) {

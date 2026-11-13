@@ -1,6 +1,7 @@
 package io.github.kltyton.kltytonui.dom;
 
 import io.github.kltyton.kltytonui.init.Document;
+import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.init.Node;
 
 public class DocumentFragment extends Node {
@@ -24,9 +25,10 @@ public class DocumentFragment extends Node {
     public String getTextContent() {
         StringBuilder builder = new StringBuilder();
         for (Node child : childNodes) {
-            if (child == null) continue;
-            String text = child.getTextContent();
-            if (text != null) builder.append(text);
+            if (child instanceof TextNode || child instanceof Element) {
+                String text = child.getTextContent();
+                if (text != null) builder.append(text);
+            }
         }
         return builder.toString();
     }

@@ -14,7 +14,7 @@
 
 ### 基本内容
 
-KltytonUI 用 HTML、CSS、Java 和 JavaScript 构建 Minecraft UI。九个目标均接入独立 Rhino 页面运行时，页面脚本不依赖 KubeJS；KubeJS 的 `KltytonUI` 模组绑定只在 Forge 1.20.1 与 NeoForge 1.21.1 提供。详见[总览](guide/overview#loader-与脚本支持)。
+KUI 使用内嵌的 NeonJS 0.1.4 执行页面脚本，每个文档都有独立的 JavaScript Realm。
 
 HTML/CSS 页面仍能在没有页面脚本的 target 中渲染；需要交互逻辑时，请确认目标 target 支持页面脚本，或从 Java 侧操作 DOM。
 它的上手门槛很低：你可以用常见的 Web 技术编写页面，也可以借助 AI 生成 HTML/CSS，再按项目需要调整。
@@ -35,9 +35,19 @@ HTML/CSS 页面仍能在没有页面脚本的 target 中渲染；需要交互逻
 
 ### 使用案例展示
 
+#### 模型预览
+
+`<model>` 在界面中显示独立的玩家或实体预览，左键拖动可调整朝向。预览实体不会加入游戏世界；元素移除时释放预览状态。
+
+```html
+<model type="bakedmodel" yaw="25" pitch="-10">minecraft:zombie</model>
+```
+
+`type="player"` 的内容为玩家 UUID，`type="bakedmodel"` 的内容为生物实体注册 ID，`type="gecko"` 使用安装的 GeckoLib 实体注册 ID。GeckoLib 不随 KUI 内置；`yaw`、`pitch`、`roll` 使用角度，`flat="true"` 按平面深度排列。默认尺寸为 128×128，可通过 CSS 调整。
+
 #### 内置纯CSS主题
 
-目前已内置Ore主题和AE主题，未来会加入更多贴合（或不贴合）MC风格的通用主题，均使用同一套CSS标识命名方式，无缝切换。
+1.2.8 新增十四套可切换主题：Ore、Claude Square/Round、CurseForge、Modrinth Light/Dark、Arwes/Arwes Transparent、Neobrutalist、Hand-Drawn Doodle、Retro Vintage、Vaporwave、Impressionist Oil 和 Mecha。公共预览示例保留在源码仓库；页面中可添加 `<theme-switcher></theme-switcher>`，完成切换时触发冒泡事件 `kui-theme-change`，事件 detail 为主题 ID。原有 Ore、AE 和 McUI 样式资源路径保留。
 
 - [永无止境载具]( https://www.mcmod.cn/class/24495.html)3D打印机
 ![永无止境载具3D打印机](https://resource-api.xyeidc.com//client/members/pics/70c150b2)
@@ -47,7 +57,7 @@ HTML/CSS 页面仍能在没有页面脚本的 target 中渲染；需要交互逻
 
 #### 自由的绘制时机
 
-页面可作为 Screen、HUD Overlay、容器界面或世界内窗口渲染。模组侧可以通过 Java API 集成；支持 KubeJS 的 target 也可从 KubeJS 调用相关功能。
+页面可作为 Screen、HUD Overlay、容器界面或世界内窗口渲染。模组侧可以通过 Java API 集成。
 
 - [东方足道屿](https://www.bilibili.com/video/BV1yzGJ6hEcp/)物品提示框
 ![东方足道馆物品提示框](https://resource-api.xyeidc.com//client/members/pics/aa944fd4)
@@ -97,7 +107,7 @@ html可以渲染在世界内的某个位置，可以配置角度、方块穿透�
 
 简单来说，使用iframe标签创建一个document时，实际上会打开一个Webview并以离屏渲染的方式绘制到iframe标签的内部区域中。
 
-WebView 页面与 KUI DOM 相互隔离；KUI 当前会转发鼠标、键盘和滚轮输入，但没有提供跨页面 DOM 或脚本桥接 API。
+WebView 页面与 KUI DOM 相互隔离。KUI 会转发鼠标、键盘和滚轮输入；Java 可通过显式授权的消息桥与指定页面交换消息，详见 [WebView 指南](guide/webview.md)。
 
 而较高的内存占用，也使得Webview难以胜任Overlay和世界内窗口的绘制方式。
 
@@ -109,10 +119,10 @@ WebView 后端目前仅提供给 Windows x64 + WebView2 Runtime。其他平台�
 
 ### 开发者须知
 
-使用 KltytonUI 无需了解内部实现。Maven Central 正在准备发布；确认所选版本公开后可使用以下配置。维护者步骤见 [Maven 发布](guide/maven-publishing)。
+使用 Sighs Maven 仓库，并选择匹配 Loader 和 Minecraft 版本的依赖。
 ```Groovy
 repositories {
-    mavenCentral()
+    maven { url = uri("https://maven.sighs.cc/repository/maven-public/") }
 }
 dependencies {
     implementation 'io.github.kltyton.kltytonui:KltytonUI-forge-1.20.1:<已发布版本>'

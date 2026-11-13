@@ -5,14 +5,16 @@
 
 #include <jni.h>
 
+#include <map>
+#include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 
 namespace {
 
 std::mutex g_registryMutex;
-std::set<jlong> g_liveHandles;
+std::map<jlong, std::shared_ptr<WebViewHost>> g_liveHandles;
+jlong g_nextHandle = 1;
 std::mutex g_errorMutex;
 std::wstring g_lastCreateError;
 
@@ -55,23 +57,13 @@ std::wstring utf8ToWide(JNIEnv* env, jstring value) {
 }
 
 jstring wideToJstring(JNIEnv* env, const std::wstring& value) {
-    if (value.empty()) {
-        return env->NewStringUTF("");
-    }
-    const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
-                                               nullptr, 0, nullptr, nullptr);
-    std::string utf8(static_cast<size_t>(utf8Length), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), &utf8[0], utf8Length,
-                        nullptr, nullptr);
-    return env->NewStringUTF(utf8.c_str());
+    return env->NewString(reinterpret_cast<const jchar*>(value.data()), static_cast<jsize>(value.size()));
 }
 
-WebViewHost* resolve(jlong handle) {
+std::shared_ptr<WebViewHost> resolve(jlong handle) {
     std::lock_guard<std::mutex> lock(g_registryMutex);
-    if (g_liveHandles.find(handle) == g_liveHandles.end()) {
-        return nullptr;
-    }
-    return reinterpret_cast<WebViewHost*>(handle);
+    const auto it = g_liveHandles.find(handle);
+    return it == g_liveHandles.end() ? nullptr : it->second;
 }
 
 }  // namespace
@@ -102,23 +94,23 @@ JNIEXPORT jlong JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_n
         JNIEnv* env, jclass, jstring url, jstring userDataDir, jint width, jint height,
         jboolean transparent, jboolean autoCapture, jint frameIntervalMs, jint frameFormat) {
     setCreateError(L"");
-    auto* host = new WebViewHost(width, height, transparent == JNI_TRUE, autoCapture == JNI_TRUE,
-                                 frameIntervalMs, frameFormat, utf8ToWide(env, userDataDir));
+    auto host = std::make_shared<WebViewHost>(width, height, transparent == JNI_TRUE, autoCapture == JNI_TRUE,
+                                             frameIntervalMs, frameFormat, utf8ToWide(env, userDataDir));
     // Start the host thread first: navigate() is delivered through the host's command
     // queue, which only accepts work once the thread is running.
     if (!host->start(20000)) {
         const std::wstring error = host->lastError();
         setCreateError(error.empty() ? L"WebView2 host failed to start" : error);
-        delete host;
         return 0;
     }
     if (url != nullptr) {
         host->navigate(utf8ToWide(env, url));
     }
-    const jlong handle = reinterpret_cast<jlong>(host);
+    jlong handle;
     {
         std::lock_guard<std::mutex> lock(g_registryMutex);
-        g_liveHandles.insert(handle);
+        handle = g_nextHandle++;
+        g_liveHandles.emplace(handle, host);
     }
     return handle;
 }
@@ -129,17 +121,15 @@ JNIEXPORT jstring JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nDestroy(JNIEnv*, jclass, jlong handle) {
-    bool live = false;
+    std::shared_ptr<WebViewHost> host;
     {
         std::lock_guard<std::mutex> lock(g_registryMutex);
-        live = g_liveHandles.erase(handle) > 0;
+        const auto it = g_liveHandles.find(handle);
+        if (it == g_liveHandles.end()) return;
+        host = std::move(it->second);
+        g_liveHandles.erase(it);
     }
-    if (!live) {
-        return;
-    }
-    auto* host = reinterpret_cast<WebViewHost*>(handle);
     host->stop();
-    delete host;
 }
 
 JNIEXPORT jboolean JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nIsAlive(JNIEnv*, jclass, jlong handle) {
@@ -147,81 +137,81 @@ JNIEXPORT jboolean JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNativ
 }
 
 JNIEXPORT jstring JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nStatus(JNIEnv* env, jclass, jlong handle) {
-    WebViewHost* host = resolve(handle);
+    auto host = resolve(handle);
     return wideToJstring(env, host == nullptr ? std::wstring(L"no such handle") : host->statusText());
 }
 
 JNIEXPORT jstring JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nLastError(JNIEnv* env, jclass, jlong handle) {
-    WebViewHost* host = resolve(handle);
+    auto host = resolve(handle);
     return wideToJstring(env, host == nullptr ? std::wstring() : host->lastError());
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nNavigate(
         JNIEnv* env, jclass, jlong handle, jstring url) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->navigate(utf8ToWide(env, url));
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nSetBoundsAndZoom(
         JNIEnv*, jclass, jlong handle, jint width, jint height, jdouble zoom) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->setBoundsAndZoom(width, height, zoom);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nSetFrameFormat(
         JNIEnv*, jclass, jlong handle, jint format) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->setFrameFormat(format);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nSetFrameInterval(
         JNIEnv*, jclass, jlong handle, jint milliseconds) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->setFrameInterval(milliseconds);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nSetAutoCapture(
         JNIEnv*, jclass, jlong handle, jboolean enabled) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->setAutoCapture(enabled == JNI_TRUE);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nRequestCapture(
         JNIEnv*, jclass, jlong handle) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->requestCapture();
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nFocus(
         JNIEnv*, jclass, jlong handle, jboolean focused) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->focus(focused == JNI_TRUE);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nMouse(
         JNIEnv*, jclass, jlong handle, jint kind, jint virtualKeys, jint mouseData, jint x, jint y) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->mouse(kind, virtualKeys, mouseData, x, y);
     }
 }
 
 JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nEval(
         JNIEnv* env, jclass, jlong handle, jstring script) {
-    if (WebViewHost* host = resolve(handle)) {
+    if (auto host = resolve(handle)) {
         host->eval(utf8ToWide(env, script));
     }
 }
 
 JNIEXPORT jobject JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nMapChannel(
         JNIEnv* env, jclass, jlong handle) {
-    WebViewHost* host = resolve(handle);
+    auto host = resolve(handle);
     if (host == nullptr) {
         return nullptr;
     }
@@ -238,6 +228,40 @@ JNIEXPORT jobject JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative
     // gone: the JVM never learns about the section, only about this view of it.
     host->addChannelView(view);
     return env->NewDirectByteBuffer(view, static_cast<jlong>(bytes));
+}
+
+JNIEXPORT void JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nEnableBridge(
+        JNIEnv*, jclass, jlong handle, jboolean enabled) {
+    if (auto host = resolve(handle)) host->enableBridge(enabled == JNI_TRUE);
+}
+
+JNIEXPORT jobjectArray JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nDrainMessages(
+        JNIEnv* env, jclass, jlong handle) {
+    auto host = resolve(handle);
+    const auto messages = host ? host->drainMessages() : std::vector<std::wstring>();
+    jclass type = env->FindClass("java/lang/String");
+    jobjectArray result = env->NewObjectArray(static_cast<jsize>(messages.size()), type, nullptr);
+    for (size_t i = 0; i < messages.size(); ++i) {
+        // Windows wchar_t and Java jchar are UTF-16, including surrogate pairs.
+        jstring value = env->NewString(reinterpret_cast<const jchar*>(messages[i].data()),
+                                      static_cast<jsize>(messages[i].size()));
+        env->SetObjectArrayElement(result, static_cast<jsize>(i), value);
+        env->DeleteLocalRef(value);
+    }
+    env->DeleteLocalRef(type);
+    return result;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_kltyton_kltytonui_webview_WebViewNative_nPostMessage(
+        JNIEnv* env, jclass, jlong handle, jlong generation, jstring json) {
+    auto host = resolve(handle);
+    if (host == nullptr || json == nullptr) return JNI_FALSE;
+    const jchar* characters = env->GetStringChars(json, nullptr);
+    if (characters == nullptr) return JNI_FALSE;
+    std::wstring message(reinterpret_cast<const wchar_t*>(characters),
+                         static_cast<size_t>(env->GetStringLength(json)));
+    env->ReleaseStringChars(json, characters);
+    return host->postMessage(static_cast<uint64_t>(generation), message) ? JNI_TRUE : JNI_FALSE;
 }
 
 }  // extern "C"

@@ -9,11 +9,16 @@ import io.github.kltyton.kltytonui.client.ClientWptSnapshotRunner;
 import io.github.kltyton.kltytonui.client.InitEvent;
 import io.github.kltyton.kltytonui.client.KltytonUIClientCommands;
 import io.github.kltyton.kltytonui.dom.expander.RecipeExpander;
+import io.github.kltyton.kltytonui.loader.ClientLoader;
+import io.github.kltyton.kltytonui.network.api.NetworkAutoRegistration;
+import io.github.kltyton.kltytonui.network.fabric.NetworkManagerImpl;
 import io.github.kltyton.kltytonui.registry.KltytonUIRegistry;
 import io.github.kltyton.kltytonui.registry.ClientMenuScreens;
 import io.github.kltyton.kltytonui.registry.Keybindings;
 import io.github.kltyton.kltytonui.world.WorldWindow;
 import io.github.kltyton.kltytonui.world.WorldWindowTestSpawner;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -23,17 +28,22 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
-import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
+import net.fabricmc.fabric.api.resource.SimpleResourceReloadListener;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.profiling.ProfilerFiller;
 
 public final class KltytonUIFabricClient implements ClientModInitializer {
+    private static final boolean DEVELOPMENT_TESTS_PRESENT = KltytonUI.class.getResource(
+            "/io/github/kltyton/kltytonui/client/ClientRuntimeSelfTest.class") != null;
     public void onInitializeClient() {
         FabricServicesBootstrap.initClient();
+        NetworkManagerImpl.initializeClient();
+        NetworkAutoRegistration.findAllAnnotatedPackets();
         // The common entrypoint runs before the client service exists. Register
         // the scan scope after installing the real Fabric client service.
         KltytonUIRegistry.scanPackages("io.github.kltyton.kltytonui.element");
@@ -51,9 +61,11 @@ public final class KltytonUIFabricClient implements ClientModInitializer {
             InitEvent.tick();
             DebugReloadWatcher.tick();
             DebugAIScreenshotTicker.tick();
-            ClientRuntimeSelfTest.tick();
-            ClientWptSnapshotRunner.tick();
-            WorldWindowTestSpawner.tick();
+            if (DEVELOPMENT_TESTS_PRESENT && !io.github.kltyton.kltytonui.spi.KuiServices.client().isProduction()) {
+                ClientRuntimeSelfTest.tick();
+                ClientWptSnapshotRunner.tick();
+                WorldWindowTestSpawner.tick();
+            }
         });
         HudRenderCallback.EVENT.register((graphics, tickDelta) -> {
             if (Minecraft.getInstance().screen != null) return;
@@ -74,16 +86,33 @@ public final class KltytonUIFabricClient implements ClientModInitializer {
                     io.github.kltyton.kltytonui.init.Window.window.fireAnimationFrame();
                     Client.drawScreenLike(graphics);
                 }));
-        ResourceManagerHelper.get(PackType.CLIENT_RESOURCES).registerReloadListener(new SimpleSynchronousResourceReloadListener() {
+        ResourceManagerHelper.get(PackType.CLIENT_RESOURCES).registerReloadListener(new SimpleResourceReloadListener<ClientLoader.ThemeResourceSnapshot>() {
             @Override
             public ResourceLocation getFabricId() {
                 return ResourceLocation.fromNamespaceAndPath(KltytonUI.MODID, "client_resources");
             }
 
             @Override
-            public void onResourceManagerReload(ResourceManager resourceManager) {
-                RecipeExpander.clearCache();
-                Minecraft.getInstance().execute(io.github.kltyton.kltytonui.loader.ClientLoader::reloadResources);
+            public CompletableFuture<ClientLoader.ThemeResourceSnapshot> load(ResourceManager resourceManager, ProfilerFiller profiler, Executor executor) {
+                return CompletableFuture.supplyAsync(() -> {
+                    var paths = resourceManager.listResources("kltytonui/kltytonui/theme",
+                                    location -> KltytonUI.MODID.equals(location.getNamespace()))
+                            .keySet().stream()
+                            .map(location -> location.getPath())
+                            .toList();
+                    return ClientLoader.prepareThemeSnapshot(paths);
+                }, executor);
+            }
+
+            @Override
+            public CompletableFuture<Void> apply(ClientLoader.ThemeResourceSnapshot themeSnapshot, ResourceManager resourceManager, ProfilerFiller profiler, Executor executor) {
+                return CompletableFuture.runAsync(() -> {
+                    RecipeExpander.clearCache();
+                    Minecraft.getInstance().execute(() -> {
+                        io.github.kltyton.kltytonui.client.model.ModelRenderService.invalidate();
+                        ClientLoader.reloadResources(themeSnapshot);
+                    });
+                }, executor);
             }
         });
     }

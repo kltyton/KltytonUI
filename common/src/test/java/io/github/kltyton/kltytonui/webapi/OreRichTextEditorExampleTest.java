@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Browser-first ORE rich-text editor resource and Rhino syntax contract. */
+/** Browser-first ORE rich-text editor resource and script syntax contract. */
 class OreRichTextEditorExampleTest {
 
     private static final String RESOURCE = "assets/kltytonui/kltytonui/tests/richtext-editor.html";
@@ -45,11 +45,11 @@ class OreRichTextEditorExampleTest {
     }
 
     @Test
-    void inlineScriptCompilesOnTheTargetRhino() throws Exception {
+    void inlineScriptCompilesOnNeon() throws Exception {
         String script = inlineScript(readResource());
-        dev.latvian.mods.rhino.Context context = RhinoTestSupport.enterContext();
-        assertNotNull(context.compileString(script, "richtext-editor.html", 1, null),
-                "the target Rhino compiler accepts the current editor script");
+        try (var engine = dev.mooner.neonjs.NeonEngine.builder().build()) {
+            assertNotNull(engine.compile(script, "richtext-editor.html"));
+        }
     }
 
     @Test

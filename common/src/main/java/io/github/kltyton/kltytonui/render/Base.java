@@ -21,6 +21,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -406,12 +407,25 @@ public class Base {
                     }
                     document.commitMotionHitTest();
                 }
+                if (io.github.kltyton.kltytonui.dev.DevTools.prepareRender(document)) {
+                    document.commitPendingStyleRecalcForRender();
+                    document.commitRenderState();
+                }
                 poseStack.translate(0, 0, documentZOffset);
                 // 首次全量几何提交分片尚未完成时，本帧几何是半成品：跳过该文档自身的
                 // paint list（上面的提交分支与下面的 finally 清理都照常执行，baseZ 决定的
                 // 文档层叠顺序也不受影响）。与文档几何无关的浮空物品 overlay 仍然绘制。
                 if (!initialCommitIncomplete) {
-                    paintDocumentNodes(poseStack, document);
+                    if (overlayNodes.isEmpty()) {
+                        DocumentPaintCache paintCache = DocumentPaintCache.forDocument(document);
+                        if (paintCache != null) {
+                            paintCache.render(document, poseStack, () -> paintDocumentNodes(poseStack, document));
+                        } else {
+                            paintDocumentNodes(poseStack, document);
+                        }
+                    } else {
+                        paintDocumentNodes(poseStack, document);
+                    }
                 }
                 // Sample after all render-frame motion/scroll geometry is committed;
                 // callbacks are queued and delivered by the next logical tick.
@@ -670,7 +684,7 @@ public class Base {
         for (int corner = 0; corner < 4; corner++) {
             point.set((float) (x + ((corner & 1) == 0 ? 0 : width)),
                     (float) (y + ((corner & 2) == 0 ? 0 : height)), 0f);
-            matrix.transformPosition(point);
+            matrix.transformProject(point);
             minX = Math.min(minX, point.x);
             minY = Math.min(minY, point.y);
             maxX = Math.max(maxX, point.x);
@@ -715,13 +729,16 @@ public class Base {
     public static double[] toLocalPoint(Element element, double x, double y) {
         if (element == null || !hasVisualTransform(element)) return new double[]{x, y};
         Matrix4f inverse = new Matrix4f(prepareWorldTransform(element));
+        if (!inverse.isAffine()) {
+            inverse.m02(0).m12(0).m22(1).m32(0).m20(0).m21(0).m23(0);
+        }
         try {
             inverse.invert();
         } catch (RuntimeException singular) {
             return new double[]{x, y};
         }
         Vector3f point = new Vector3f((float) x, (float) y, 0f);
-        inverse.transformPosition(point);
+        inverse.transformProject(point);
         if (!Float.isFinite(point.x) || !Float.isFinite(point.y)) return new double[]{x, y};
         return new double[]{point.x, point.y};
     }

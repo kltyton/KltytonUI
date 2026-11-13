@@ -119,15 +119,6 @@ neoForge {
 repositories {
     mavenCentral()
     mavenLocal()
-    // Rhino (and KubeJS, when a 26.2 coordinate exists) live on the Latvian maven.
-    maven {
-        name = "Latvian"
-        url = "https://maven.latvian.dev/releases"
-        content {
-            includeGroup "dev.latvian.mods"
-            includeGroup "dev.latvian.apps"
-        }
-    }
     maven {
         name = "JitPack"
         url = "https://jitpack.io"
@@ -156,17 +147,6 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.11.4'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-
-    // Tests compile against common/, whose public API exposes Rhino types
-    // (e.g. Element#addEventListener(String, Function)), so Rhino must be on
-    // the test compile classpath just like in the forge-1.20.1 target.
-    testImplementation "dev.latvian.mods:rhino:${rhino_version}"
-
-    // Required pure-Java page runtime; KubeJS remains optional.
-    compileOnly "dev.latvian.mods:rhino:${rhino_version}"
-    runtimeOnly "dev.latvian.mods:rhino:${rhino_version}"
-    // KubeJS is optional: only add compileOnly+kubejs-neoforge for 26.2 when a
-    // coordinate is published; the mod main class guards on ModList.isLoaded.
 }
 
 tasks.named('sourcesJar', Jar).configure {
@@ -182,7 +162,6 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching('kltytonui.mixins.json') {
         filter { line -> line.contains(excludedMixinRefmap) ? null : line }
     }
-    exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: neoforge_262_minecraft_version,
             neoforge_version: neoforge_262_version,
@@ -223,4 +202,5 @@ tasks.withType(Test).configureEach {
     classpath += configurations.kuiTestModRuntime
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

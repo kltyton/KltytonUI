@@ -231,6 +231,34 @@ public record Size(double width, double height) {
         }
     }
 
+    private static final ThreadLocal<Integer> MIN_CONTENT_DEPTH = ThreadLocal.withInitial(() -> 0);
+
+    public static boolean isMinContentMeasurementContext() {
+        return MIN_CONTENT_DEPTH.get() > 0;
+    }
+
+    public static Size minContent(Element element) {
+        int depth = MIN_CONTENT_DEPTH.get();
+        MIN_CONTENT_DEPTH.set(depth + 1);
+        try {
+            return measureNatural(element, LayoutMeasureCache.SIZE_NATURAL, Double.NaN);
+        } finally {
+            if (depth == 0) MIN_CONTENT_DEPTH.remove();
+            else MIN_CONTENT_DEPTH.set(depth);
+        }
+    }
+
+    static Size unconstrainedNatural(Element element, boolean minimum) {
+        Map<Element, Double> previous = NATURAL_CONTENT_WIDTHS.get();
+        NATURAL_CONTENT_WIDTHS.remove();
+        try {
+            return minimum ? minContent(element) : natural(element);
+        } finally {
+            if (previous.isEmpty()) NATURAL_CONTENT_WIDTHS.remove();
+            else NATURAL_CONTENT_WIDTHS.set(previous);
+        }
+    }
+
     private static Size measureNatural(Element element, int cacheMode, double availableWidth) {
         if (element == null) return ZERO;
         boolean ownMeasureScope = !LayoutMeasureCache.isActive();
@@ -252,7 +280,9 @@ public record Size(double width, double height) {
                 Set<Element> resolving = RESOLVING.get();
                 boolean firstVisit = resolving.add(element);
                 try {
-                    Size result = computeSize(element, false);
+                    boolean naturalCacheMiss = cacheMode == LayoutMeasureCache.SIZE_NATURAL
+                            && Double.isNaN(availableWidth) && NATURAL_CONTENT_WIDTHS.get().isEmpty();
+                    Size result = computeSize(element, false, naturalCacheMiss);
                     LayoutMeasureCache.putSize(cacheMode, element, availableWidth, Double.NaN, true, result);
                     return result;
                 } finally {
@@ -284,6 +314,7 @@ public record Size(double width, double height) {
     public static boolean hasNaturalWidthConstraint(Element element) {
         if (element == null) return false;
         Map<Element, Double> constraints = NATURAL_CONTENT_WIDTHS.get();
+        if (constraints.isEmpty()) return false;
         Element current = element;
         while (current != null) {
             if (constraints.containsKey(current)) return true;
@@ -299,6 +330,7 @@ public record Size(double width, double height) {
 
     static Double getNaturalMeasurementWidthContext(Element element) {
         Map<Element, Double> constraints = NATURAL_CONTENT_WIDTHS.get();
+        if (constraints.isEmpty()) return null;
         Element current = element;
         while (current != null) {
             Double width = constraints.get(current);
@@ -406,10 +438,14 @@ public record Size(double width, double height) {
     }
 
     private static Size computeSize(Element element, boolean allowFlexAdjustments) {
+        return computeSize(element, allowFlexAdjustments, false);
+    }
+
+    private static Size computeSize(Element element, boolean allowFlexAdjustments, boolean naturalCacheMiss) {
         boolean intrinsicMeasurement = isNaturalMeasurementContext();
         Size cache = intrinsicMeasurement ? null : element.getRenderer().size.get();
         if (cache != null) return cache;
-        if (intrinsicMeasurement && !allowFlexAdjustments) {
+        if (intrinsicMeasurement && !allowFlexAdjustments && !naturalCacheMiss) {
             Size naturalCache = getNaturalMeasurementCache(element);
             if (naturalCache != null) return naturalCache;
         }
@@ -420,13 +456,10 @@ public record Size(double width, double height) {
             return ZERO;
         }
 
-        Size gridUsedSize = intrinsicMeasurement ? null : Grid.resolveAssignedSize(element);
-        if (gridUsedSize != null
-                && element.parentElement != null
-                && Layout.isGridDisplay(element.parentElement.getComputedStyle().display)
-                && Layout.isInFlow(style)) {
-            element.getRenderer().size.set(gridUsedSize);
-            return gridUsedSize;
+        Size assignedSize = intrinsicMeasurement ? null : Layout.resolveAssignedSize(element);
+        if (assignedSize != null) {
+            element.getRenderer().size.set(assignedSize);
+            return assignedSize;
         }
 
         boolean isText = element instanceof AbstractText
@@ -453,8 +486,21 @@ public record Size(double width, double height) {
         double verticalBox = box.getBorderVertical() + box.getPaddingVertical();
 
         boolean borderBox = style.isBorderBox();
-        CssLength widthLength = style.widthLength();
-        CssLength heightLength = style.heightLength();
+        // CSS 2.1 §10.3.1/§10.6.1: width/height do not apply to non-replaced in-flow
+        // inline boxes. The same exemption covers min/max-width/height ("do not apply
+        // to non-replaced inline elements"), and aspect-ratio does not apply to inline
+        // boxes either (CSS Sizing 4: "all elements except inline boxes and internal
+        // ruby or table boxes"), so all six are neutralised to auto together.
+        // Inline-blocks remain sized boxes and keep the normal sizing path.
+        boolean unsizedInline = "inline".equalsIgnoreCase(style.display)
+                && Layout.isInFlow(style)
+                && !isReplacedInline(element)
+                && element.parentElement != null
+                && !Layout.isFlexDisplay(element.parentElement.getComputedStyle().display)
+                && !Layout.isGridDisplay(element.parentElement.getComputedStyle().display);
+        CssLength widthLength = unsizedInline || (intrinsicMeasurement && "table-cell".equals(style.display))
+                ? CssLength.parse("auto") : style.widthLength();
+        CssLength heightLength = unsizedInline ? CssLength.parse("auto") : style.heightLength();
         boolean fixedPositioned = "fixed".equals(style.position);
         boolean absolutePositioned = "absolute".equals(style.position) || fixedPositioned;
         double contentWidth = contentSize.width;
@@ -483,10 +529,11 @@ public record Size(double width, double height) {
                 && (autoInlineWidthAncestor.getRenderer().size.get() == null
                 || isResolving(autoInlineWidthAncestor));
         boolean percentWidthIndefinite = intrinsicMeasurement
-                && widthLength.isPercent()
+                && widthLength.dependsOnPercentage()
                 && getNaturalMeasurementWidthContext(element) == null
                 && element.parentElement != null
-                && !hasDefiniteAutoResolvedWidthInternal(element.parentElement);
+                && (element.parentElement.getComputedStyle().isGridDisplay()
+                || !hasDefiniteAutoResolvedWidthInternal(element.parentElement));
         boolean intrinsicPercentageContribution = widthLength.isPercent()
                 && getNaturalMeasurementWidthContext(element) == null
                 && (percentWidthIndefinite || indefiniteAutoInlinePercentage
@@ -532,6 +579,26 @@ public record Size(double width, double height) {
             double right = resolveLength(style.right, parentWidth, 0);
             contentWidth = Math.max(0, parentWidth - left - right - horizontalBox);
         }
+        if (absolutePositioned && unsetWidth && !(hasLeft && hasRight)
+                && isText && !(element instanceof AbstractText) && !intrinsicMeasurement) {
+            Text text = Text.of(element);
+            double available = parentWidth - horizontalBox - box.getMarginHorizontal();
+            if (hasLeft) available -= resolveLength(style.left, parentWidth, 0);
+            if (hasRight) available -= resolveLength(style.right, parentWidth, 0);
+            double preferred = Text.wrap(text, 0).width();
+            double minimum = preferred;
+            if (Text.allowsSoftWrap(text.whiteSpace)) {
+                minimum = 0;
+                java.text.BreakIterator breaks = java.text.BreakIterator.getLineInstance(Locale.ROOT);
+                breaks.setText(text.content);
+                int start = breaks.first();
+                for (int end = breaks.next(); end != java.text.BreakIterator.DONE; start = end, end = breaks.next()) {
+                    minimum = Math.max(minimum, Text.measureLine(text, text.content.substring(start, end).stripTrailing()));
+                }
+            }
+            contentWidth = Math.min(preferred, Math.max(minimum, available));
+            if (unsetHeight) contentHeight = Text.wrap(text, contentWidth).height(text.lineHeight);
+        }
         if (absolutePositioned && unsetHeight && !hasIntrinsicSize(element)
                 && hasTop && hasBottom && definiteParentHeight != null) {
             double top = resolveLength(style.top, parentHeight, 0);
@@ -560,7 +627,9 @@ public record Size(double width, double height) {
         }
         if (!unsetHeight && (!heightLength.isPercent() || definiteParentHeight != null)) {
             double resolved = heightLength.resolveOr(contentHeight, parentHeight, element);
-            contentHeight = borderBox ? Math.max(0, resolved - verticalBox) : Math.max(0, resolved);
+            double specifiedHeight = borderBox ? Math.max(0, resolved - verticalBox) : Math.max(0, resolved);
+            contentHeight = "table-cell".equals(style.display)
+                    ? Math.max(contentHeight, specifiedHeight) : specifiedHeight;
         }
 
         Double aspectRatio = parseAspectRatio(style.aspectRatio);
@@ -684,10 +753,11 @@ public record Size(double width, double height) {
         boolean allowWidthPercentResolution = !intrinsicMeasurement
                 || getIntrinsicWidthOwnerContext() != element && !hasIntrinsicWidthOwnerAncestor(element)
                 || naturalWidthConstraint != null;
-        double constrainedContentWidth = clampContentExtent(contentWidth, horizontalBox,
+        double constrainedContentWidth = unsizedInline ? Math.max(0, contentWidth) : clampContentExtent(contentWidth, horizontalBox,
                 style, true, parentWidth, allowWidthPercentResolution, element);
-        double constrainedContentHeight = clampContentExtent(contentHeight, verticalBox, style, false, parentHeight, definiteParentHeight != null, element);
-        if (aspectRatio != null && aspectRatio > 0) {
+        double constrainedContentHeight = unsizedInline ? Math.max(0, contentHeight)
+                : clampContentExtent(contentHeight, verticalBox, style, false, parentHeight, definiteParentHeight != null, element);
+        if (!unsizedInline && aspectRatio != null && aspectRatio > 0) {
             if (flexCrossHeightStretched && unsetWidth && unsetHeight) {
                 constrainedContentWidth = aspectWidthFromHeight(
                         constrainedContentHeight, aspectRatio, borderBox, horizontalBox, verticalBox);
@@ -706,6 +776,19 @@ public record Size(double width, double height) {
         }
         contentWidth = constrainedContentWidth;
         contentHeight = constrainedContentHeight;
+        Size tableContent = Layout.constrainedContentSize(element, contentWidth);
+        if (tableContent != null) {
+            contentWidth = tableContent.width();
+            contentHeight = Math.max(tableContent.height(), unsetHeight
+                    ? clampContentExtent(tableContent.height(), verticalBox, style, false,
+                            parentHeight, definiteParentHeight != null, element) : contentHeight);
+        }
+        if (absolutePositioned && unsetWidth && !(hasLeft && hasRight) && unsetHeight
+                && !insetResolvedHeight && isText && !(element instanceof AbstractText) && !intrinsicMeasurement) {
+            Text text = Text.of(element);
+            contentHeight = clampContentExtent(Text.wrap(text, contentWidth).height(text.lineHeight), verticalBox,
+                    style, false, parentHeight, definiteParentHeight != null, element);
+        }
 
         double totalWidth = contentWidth + horizontalBox;
         double totalHeight = contentHeight + verticalBox;
@@ -804,9 +887,11 @@ public record Size(double width, double height) {
 
         Map<Element, Double> constraints = NATURAL_CONTENT_WIDTHS.get();
         Element[] route = element.getRouteArray();
-        for (Element current : route) {
-            Double constrainedWidth = constraints.get(current);
-            if (constrainedWidth != null) return Math.max(0, constrainedWidth);
+        if (!constraints.isEmpty()) {
+            for (Element current : route) {
+                Double constrainedWidth = constraints.get(current);
+                if (constrainedWidth != null) return Math.max(0, constrainedWidth);
+            }
         }
         Set<Element> intrinsicOwners = INTRINSIC_WIDTH_OWNERS.get();
         for (Element current : route) {
@@ -996,6 +1081,8 @@ public record Size(double width, double height) {
             return Math.max(0, horizontal ? viewport.width() : viewport.height());
         }
         Box cbBox = Box.of(cb);
+        Layout.ContainingArea gridArea = Layout.containingArea(element, cb);
+        if (gridArea != null) return horizontal ? gridArea.width() : gridArea.height();
         if (explicit) {
             Double content = horizontal ? resolveOwnExplicitContentWidth(cb) : resolveOwnExplicitContentHeight(cb);
             if (content == null) return null;
@@ -1133,10 +1220,15 @@ public record Size(double width, double height) {
      * 既不撑满包含块，也不被 left/right（或 inset）拉伸。浏览器里的 {@code <iframe>} 正是
      * 如此：不加宽度就是 300×150，写 {@code inset:0} 也不会被撑开。</p>
      */
-    private static boolean hasIntrinsicSize(Element element) {
+    static boolean hasIntrinsicSize(Element element) {
         return element instanceof io.github.kltyton.kltytonui.element.Canvas
                 || element instanceof io.github.kltyton.kltytonui.element.Iframe
                 || element instanceof io.github.kltyton.kltytonui.element.Select;
+    }
+
+    private static boolean isReplacedInline(Element element) {
+        if (element instanceof AbstractText || hasIntrinsicSize(element)) return true;
+        return Layout.isReplacedElement(element);
     }
 
     /** Public form of {@link #shouldFillAvailableBlockWidth} for the flex layout. */
@@ -1178,6 +1270,7 @@ public record Size(double width, double height) {
         Element parent = element.parentElement;
         if (parent != null) {
             Style parentStyle = parent.getRawComputedStyle();
+            if (parentStyle.isFlexDisplay()) return false;
             if (isAutoWidthPositionedContainer(parent, parentStyle)) {
                 // An auto-width positioned container is first measured from the
                 // intrinsic contributions of its children. During that pass the
@@ -1187,6 +1280,7 @@ public record Size(double width, double height) {
             }
         }
         String display = style.display == null ? "" : style.display.trim().toLowerCase(Locale.ROOT);
+        if (Table.isStructure(display) || "table-cell".equals(display)) return false;
         if ("inline".equals(display)
                 || "inline-block".equals(display)
                 || "inline-flex".equals(display)
@@ -1345,7 +1439,13 @@ public record Size(double width, double height) {
             CSS.Declaration declared = document.documentElement.cssCache.get("fontSize");
             fontSize = declared == null ? null : declared.value();
         }
-        return tryResolveLength(fontSize, defaultFontSize, defaultFontSize);
+        var memo = document.documentElement.getRenderer();
+        double width = getWindowWidth();
+        double height = getWindowHeight();
+        if (memo.hasRootFontMemo(fontSize, width, height)) return memo.getRootFontMemoValue();
+        Double resolved = tryResolveLength(fontSize, defaultFontSize, defaultFontSize);
+        memo.setRootFontMemo(fontSize, width, height, resolved);
+        return resolved;
     }
 
     static Double parseAspectRatio(String raw) {
@@ -1371,6 +1471,7 @@ public record Size(double width, double height) {
         measuring.verticalAlign = base.verticalAlign;
         measuring.whiteSpace = base.whiteSpace;
         measuring.wordBreak = base.wordBreak;
+        measuring.hyphenBreak = base.hyphenBreak;
         measuring.textIndent = 0;
         measuring.letterSpacing = base.letterSpacing;
         measuring.content = text;

@@ -48,6 +48,7 @@ import org.joml.Vector4f;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
+import org.lwjgl.system.MemoryUtil;
 
 /**
  * Fabric 26.1 render bridge.
@@ -64,8 +65,8 @@ import org.lwjgl.opengl.GL30;
  * <p>Stencil: vanilla 26.1 only models depth in its pipelines and offers no
  * stencil-capable texture format at all ({@code TextureFormat} has no
  * depth-stencil entries, {@code CommandEncoder} cannot clear a stencil buffer) —
- * NeoForge patches those in. KUI's stencil-backed masks therefore degrade to the
- * scissor path on this loader; see {@link #supportsStencil()}.</p>
+ * NeoForge patches those in. KUI uses color-and-depth clip layers for shaped
+ * masks on this loader.</p>
  *
  * <p>Coordinate space: all KUI content is drawn in GUI coordinates with an
  * orthographic GUI projection and an identity model-view. The PIP renderer
@@ -98,6 +99,8 @@ public final class RenderService implements KuiRenderService {
     private GpuBuffer filterVertexBuffer;
     private long filterVertexCapacity;
     private GpuBuffer filterUniformBuffer;
+    private final io.github.kltyton.kltytonui.render.BackgroundUniforms backgroundUniforms = new io.github.kltyton.kltytonui.render.BackgroundUniforms();
+    private GpuBuffer backgroundUniformBuffer;
     private final ByteBufferBuilder meshByteBuffer = new ByteBufferBuilder(786432);
     private int blitReadFbo;
     private int blitDrawFbo;
@@ -201,6 +204,16 @@ public final class RenderService implements KuiRenderService {
 
     @Override public void disableScissorTest() { RenderSystem.disableScissorForRenderTypeDraws(); }
 
+    @Override
+    public int currentRenderTargetHeight() {
+        RenderTarget target = OutputTargets.currentTarget();
+        if (target == Minecraft.getInstance().getMainRenderTarget()
+                && RenderSystem.outputColorTextureOverride != null) {
+            return RenderSystem.outputColorTextureOverride.texture().getHeight(0);
+        }
+        return target.height;
+    }
+
     // ------------------------------------------------------------------
     // Stencil — unsupported on this loader; see clearStencilBuffer below
     // ------------------------------------------------------------------
@@ -217,14 +230,7 @@ public final class RenderService implements KuiRenderService {
     public void setStencilOp(int sfail, int dpfail, int dppass) {
     }
 
-    /**
-     * Vanilla 26.1 exposes no stencil-capable texture format at all
-     * ({@code TextureFormat} only has RGBA8/RED8/RED8I/DEPTH32) and the
-     * {@code CommandEncoder} cannot clear a stencil buffer, so KUI's stencil
-     * masks are unavailable here. {@link #supportsStencil()} returns false,
-     * which makes {@code Mask} take its scissor-only path and never reach the
-     * stencil branch; these overrides exist only to honour the SPI contract.
-     */
+    /** Vanilla 26.1 does not expose stencil attachments or stencil clearing. */
     @Override
     public void clearStencilBuffer() {
     }
@@ -232,9 +238,11 @@ public final class RenderService implements KuiRenderService {
     @Override
     public void clearDepthBuffer() {
         RenderTarget target = OutputTargets.currentTarget();
-        GpuTexture depthTexture = RenderSystem.outputDepthTextureOverride != null
+        RenderTarget mainTarget = Minecraft.getInstance().getMainRenderTarget();
+        if (target == null) target = mainTarget;
+        GpuTexture depthTexture = target == mainTarget && RenderSystem.outputDepthTextureOverride != null
                 ? RenderSystem.outputDepthTextureOverride.texture()
-                : (target == null ? Minecraft.getInstance().getMainRenderTarget() : target).getDepthTexture();
+                : target.getDepthTexture();
         if (depthTexture != null) {
             RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(depthTexture, 1.0);
         }
@@ -275,12 +283,19 @@ public final class RenderService implements KuiRenderService {
 
     @Override
     public boolean supportsStencil() {
-        // 26.1 vanilla has no stencil-capable texture format (NeoForge patches
-        // one in), so no KUI target — main, PIP or offscreen — can carry a
-        // stencil attachment on this loader. Reporting the truth here makes
-        // Mask latch its scissor-only fallback instead of issuing stencil draws
-        // that could never be honoured.
+        // Shaped masks use clip layers; the vanilla hardware stencil API is absent.
         return false;
+    }
+
+    /**
+     * Non-rectangular clips on this loader are depth-preserving layers rather
+     * than stencil masks: the live color and depth of the content are copied
+     * into a layer target, the mask geometry then restores those layers through
+     * {@link #beginClipComposite(FboHandle)}.
+     */
+    @Override
+    public boolean usesClipLayers() {
+        return true;
     }
 
     @Override
@@ -312,6 +327,30 @@ public final class RenderService implements KuiRenderService {
             case INTERSECT -> PipelineRegistry.getFilterMaskIntersect();
             case SUBTRACT -> PipelineRegistry.getFilterMaskSubtract();
             case EXCLUDE -> PipelineRegistry.getFilterMaskExclude();
+        };
+    }
+
+    @Override public Object getBackgroundShader() { return BackgroundPipelines.shader(); }
+
+    @Override
+    public RenderStateScope pushBackgroundTarget(FboHandle target) {
+        RenderTarget previousTarget = OutputTargets.currentTarget();
+        RenderStateScope state = pushFilterRenderState();
+        ScissorState scissor = RenderSystem.getScissorStateForRenderTypeDraws();
+        boolean clipped = scissor.enabled();
+        int x = scissor.x(), y = scissor.y(), w = scissor.width(), h = scissor.height();
+        var modelView = RenderSystem.getModelViewStack();
+        modelView.pushMatrix();
+        modelView.identity();
+        if (target != null) bindWrite(target, true);
+        disableScissorTest();
+        disableStencilTest();
+        return () -> {
+            OutputTargets.setCurrent(previousTarget);
+            modelView.popMatrix();
+            if (clipped) RenderSystem.enableScissorForRenderTypeDraws(x, y, w, h);
+            else RenderSystem.disableScissorForRenderTypeDraws();
+            if (state != null) state.close();
         };
     }
 
@@ -351,6 +390,7 @@ public final class RenderService implements KuiRenderService {
 
     @Override
     public void setShaderUniform4f(String name, float a, float b, float c, float d) {
+        if (backgroundUniforms.set(name, a, b, c, d)) return;
         switch (name) {
             case "ShadowColor" -> {
                 shadowColorR = a; shadowColorG = b; shadowColorB = c; shadowColorA = d;
@@ -436,11 +476,20 @@ public final class RenderService implements KuiRenderService {
      * the std140 {@code FilterParams} block and the Sampler0/Sampler1 views.
      */
     private void drawWithPass(RenderPipeline pipeline, MeshData meshData) {
+        boolean backgroundPipeline = currentShader == BackgroundPipelines.shader();
+        if (backgroundPipeline) {
+            MeshData.DrawState draw = meshData.drawState();
+            pipeline = BackgroundPipelines.adapt(PipelineCache.pipeline(
+                    draw.format(), draw.mode(), depthTest, depthFunc, depthMask, blend,
+                    srcRgb, dstRgb, srcAlpha, dstAlpha, cull, polygonOffset, biasScale, biasUnits,
+                    colorWriteMask));
+        }
         boolean filterPipeline = pipeline == PipelineRegistry.getFilter()
                 || pipeline == PipelineRegistry.getFilterBlur()
                 || pipeline == PipelineRegistry.getFilterBlend();
         boolean compositePipeline = pipeline == PipelineRegistry.getFilter()
                 || pipeline == PipelineRegistry.getFilterBlend();
+        boolean clipLayerPipeline = pipeline == PipelineRegistry.getClipLayer();
         RenderTarget output = OutputTargets.currentTarget();
         if (output == null) return;
         GpuTextureView colorView = output.getColorTextureView();
@@ -470,7 +519,8 @@ public final class RenderService implements KuiRenderService {
 
         // 26.1 keeps the command encoder occupied while a render pass is open;
         // upload the std140 block before creating the pass.
-        GpuBuffer uniforms = filterPipeline ? updateFilterUniforms(device) : null;
+        GpuBuffer uniforms = backgroundPipeline ? updateBackgroundUniforms()
+                : filterPipeline ? updateFilterUniforms(device) : null;
         GpuBufferSlice transforms = RenderSystem.getDynamicUniforms().writeTransform(
                 RenderSystem.getModelViewMatrix(),
                 new Vector4f(1, 1, 1, 1), new Vector3f(), new Matrix4f());
@@ -480,23 +530,37 @@ public final class RenderService implements KuiRenderService {
                 depthView, OptionalDouble.empty());
         try {
             pass.setPipeline(pipeline);
-            if (uniforms != null) pass.setUniform("FilterParams", uniforms);
+            if (uniforms != null) pass.setUniform(backgroundPipeline ? "BackgroundParams" : "FilterParams", uniforms);
             if (scissor.enabled()) {
                 pass.enableScissor(scissor.x(), scissor.y(), scissor.width(), scissor.height());
             }
             RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("DynamicTransforms", transforms);
             MeshData.DrawState state = meshData.drawState();
-            // Only textured meshes may sample Sampler0; a leftover view from an
-            // earlier image/filter pass would otherwise tint plain colour meshes.
-            boolean textured = state.format() == DefaultVertexFormat.POSITION_TEX;
-            if (textured && samplers[0] != null) {
-                pass.bindTexture("Sampler0", samplers[0],
-                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-            }
-            if (compositePipeline && samplers[1] != null) {
-                pass.bindTexture("Sampler1", samplers[1],
-                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+            if (clipLayerPipeline) {
+                // The clip layer shader samples both the layer color and depth at
+                // the fragment's screen-space position; NEAREST keeps that lookup
+                // aligned with the source pixel instead of interpolating depth.
+                if (samplers[0] != null) {
+                    pass.bindTexture("Sampler0", samplers[0],
+                            RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                }
+                if (samplers[1] != null) {
+                    pass.bindTexture("Sampler1", samplers[1],
+                            RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                }
+            } else {
+                // Only textured meshes may sample Sampler0; a leftover view from an
+                // earlier image/filter pass would otherwise tint plain colour meshes.
+                boolean textured = state.format() == DefaultVertexFormat.POSITION_TEX;
+                if (textured && samplers[0] != null) {
+                    pass.bindTexture("Sampler0", samplers[0],
+                            RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+                }
+                if (compositePipeline && samplers[1] != null) {
+                    pass.bindTexture("Sampler1", samplers[1],
+                            RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+                }
             }
             pass.setVertexBuffer(0, filterVertexBuffer);
             AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(state.mode());
@@ -505,6 +569,19 @@ public final class RenderService implements KuiRenderService {
         } finally {
             pass.close();
         }
+    }
+
+    private GpuBuffer updateBackgroundUniforms() {
+        int size = io.github.kltyton.kltytonui.render.BackgroundUniforms.VECTOR_COUNT * 16;
+        GpuDevice device = RenderSystem.getDevice();
+        if (backgroundUniformBuffer == null) {
+            backgroundUniformBuffer = device.createBuffer(() -> "kltytonui_background_uniforms",
+                    GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, size);
+        }
+        try (GpuBuffer.MappedView mapped = device.createCommandEncoder().mapBuffer(backgroundUniformBuffer, false, true)) {
+            backgroundUniforms.write(mapped.data());
+        }
+        return backgroundUniformBuffer;
     }
 
     private GpuBuffer updateFilterUniforms(GpuDevice device) {
@@ -583,9 +660,7 @@ public final class RenderService implements KuiRenderService {
 
     @Override
     public FboHandle createOffscreenTarget(int width, int height, boolean useDepth) {
-        // Vanilla 26.1 only offers a depth-only TextureTarget (the stencil
-        // variant is a NeoForge addition), so filter ping-pong targets fall back
-        // to scissor-only masks via currentTargetHasStencil().
+        // Clip layers preserve the ordinary depth attachment.
         TextureTarget target = new TextureTarget("kltytonui_filter", width, height, useDepth);
         return FboHandle.of(target, width, height);
     }
@@ -594,15 +669,45 @@ public final class RenderService implements KuiRenderService {
     public FboHandle getMainRenderTarget() {
         RenderTarget target = Minecraft.getInstance().getMainRenderTarget();
         OutputTargets.setCurrent(target);
+        if (RenderSystem.outputColorTextureOverride != null) {
+            GpuTexture texture = RenderSystem.outputColorTextureOverride.texture();
+            return FboHandle.of(target, texture.getWidth(0), texture.getHeight(0));
+        }
         return FboHandle.of(target, target.width, target.height);
+    }
+
+    /**
+     * Clip layers must be sized from the live attachment, not the logical main
+     * target placeholder. While a PIP render runs, vanilla redirects the actual
+     * color output to a texture that may differ from the main target by a scale
+     * rounding; sizing the layer from the override keeps {@link
+     * #copyClipSource(FboHandle, FboHandle)}'s equal-dimension contract valid.
+     */
+    @Override
+    public int clipTargetWidth(FboHandle target) {
+        if (target == null) return 0;
+        RenderTarget renderTarget = target.as();
+        if (renderTarget == Minecraft.getInstance().getMainRenderTarget()
+                && RenderSystem.outputColorTextureOverride != null) {
+            return RenderSystem.outputColorTextureOverride.texture().getWidth(0);
+        }
+        return target.width;
+    }
+
+    @Override
+    public int clipTargetHeight(FboHandle target) {
+        if (target == null) return 0;
+        RenderTarget renderTarget = target.as();
+        if (renderTarget == Minecraft.getInstance().getMainRenderTarget()
+                && RenderSystem.outputColorTextureOverride != null) {
+            return RenderSystem.outputColorTextureOverride.texture().getHeight(0);
+        }
+        return target.height;
     }
 
     @Override
     public void enableStencil(FboHandle target) {
-        // Nothing to retrofit: vanilla 26.1 allocates the main target's depth
-        // attachment as DEPTH32 without stencil bits, and there is no vanilla
-        // API to replace it. Mask sees that through currentTargetHasStencil()
-        // and takes its scissor path.
+        // Non-rectangular masks use depth-preserving clip layers on this backend.
     }
 
     @Override
@@ -647,8 +752,68 @@ public final class RenderService implements KuiRenderService {
     }
 
     @Override
+    public void drawOffscreenTexture(Matrix4f matrix, FboHandle target, float width, float height) {
+        RenderStateScope state = pushFilterRenderState();
+        try {
+            bindColorTexture(target, 0);
+            setShader(BackgroundPipelines.texture());
+            enableBlend();
+            setBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA,
+                    GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            MeshBuilder mesh = beginMesh(MeshMode.QUADS, MeshFormat.POSITION_TEX);
+            mesh.vertexUV(matrix, 0, height, 0, 0, 1);
+            mesh.vertexUV(matrix, width, height, 0, 1, 1);
+            mesh.vertexUV(matrix, width, 0, 0, 1, 0);
+            mesh.vertexUV(matrix, 0, 0, 0, 0, 0);
+            mesh.submit();
+        } finally {
+            if (state != null) state.close();
+        }
+    }
+
+    @Override
     public RenderStateScope pushFilterRenderState() {
         return new PipelineFilterState();
+    }
+
+    /**
+     * Prepares a clip-layer composite: the freshly rendered content is resolved
+     * through the read path first (the same NVIDIA-verified synchronisation used
+     * by {@link #resolveTarget(FboHandle)}), the mutable pipeline state is
+     * snapshotted, and the clip-layer pipeline is selected with the content's
+     * color and depth bound as Sampler0/Sampler1. The caller has already bound
+     * the parent target and now draws the rounded/polygon mask geometry with a
+     * POSITION mesh under the original projection/model-view.
+     */
+    @Override
+    public RenderStateScope beginClipComposite(FboHandle content) {
+        if (content == null) {
+            throw new IllegalArgumentException("beginClipComposite requires a content target");
+        }
+        RenderTarget source = content.as();
+        resolveTarget(content);
+        RenderTarget mainTarget = Minecraft.getInstance().getMainRenderTarget();
+        GpuTextureView colorView = source.getColorTextureView();
+        if (source == mainTarget && RenderSystem.outputColorTextureOverride != null) {
+            colorView = RenderSystem.outputColorTextureOverride;
+        }
+        GpuTextureView depthView = source.getDepthTextureView();
+        if (source == mainTarget && RenderSystem.outputDepthTextureOverride != null) {
+            depthView = RenderSystem.outputDepthTextureOverride;
+        }
+        if (colorView == null || depthView == null) {
+            throw new IllegalStateException("beginClipComposite requires color and depth content");
+        }
+        RenderStateScope scope = pushFilterRenderState();
+        try {
+            currentShader = PipelineRegistry.getClipLayer();
+            samplers[0] = colorView;
+            samplers[1] = depthView;
+            return scope;
+        } catch (RuntimeException | Error failure) {
+            scope.close();
+            throw failure;
+        }
     }
 
     private final class PipelineFilterState implements RenderStateScope {
@@ -813,6 +978,96 @@ public final class RenderService implements KuiRenderService {
         resolveBlitDestination(drawFbo, halfW + halfW / 2, halfH / 2);
     }
 
+    /**
+     * Clones the complete live color and depth of {@code source} into the
+     * equal-sized {@code destination}. The destination is a clip layer created
+     * by KUI's offscreen target factory, so it always carries copyable RGBA8 and
+     * DEPTH32 attachments; the source may be the logical main target, in which
+     * case the live PIP output overrides are used instead of the placeholder
+     * main attachments.
+     *
+     * <p>The color copy goes through {@link #blitFramebuffer(FboHandle,
+     * FboHandle, int, int, int, int)}, which already synchronises the GL sampler
+     * cache after a PIP render and handles the Vulkan fallback. The depth copy
+     * uses the vanilla engine copy signature directly and therefore requires
+     * {@code COPY_SRC}/{@code COPY_DST} on both depth attachments. Invalid
+     * contracts throw instead of silently leaving a partially copied layer.</p>
+     */
+    @Override
+    public void copyClipSource(FboHandle source, FboHandle destination) {
+        if (source == null || destination == null) {
+            throw new IllegalArgumentException("copyClipSource requires non-null source and destination");
+        }
+        RenderTarget src = source.as();
+        RenderTarget dst = destination.as();
+        RenderTarget mainTarget = Minecraft.getInstance().getMainRenderTarget();
+        boolean sourceIsMain = src == mainTarget;
+
+        GpuTextureView sourceColorView = src.getColorTextureView();
+        GpuTexture sourceColor = sourceColorView == null ? null : sourceColorView.texture();
+        boolean sourceUsesColorOverride = sourceIsMain
+                && RenderSystem.outputColorTextureOverride != null;
+        if (sourceUsesColorOverride) {
+            sourceColorView = RenderSystem.outputColorTextureOverride;
+            sourceColor = sourceColorView.texture();
+        }
+        GpuTexture destinationColor = dst.getColorTexture();
+        if (sourceColor == null || destinationColor == null) {
+            throw new IllegalStateException("copyClipSource requires color attachments on both "
+                    + "source and destination");
+        }
+
+        int width = sourceColor.getWidth(0);
+        int height = sourceColor.getHeight(0);
+        int destinationWidth = destinationColor.getWidth(0);
+        int destinationHeight = destinationColor.getHeight(0);
+        if (width != destinationWidth || height != destinationHeight) {
+            throw new IllegalStateException("copyClipSource requires equal actual dimensions, but source "
+                    + width + "x" + height + " and destination "
+                    + destinationWidth + "x" + destinationHeight);
+        }
+        if ((destinationColor.usage() & GpuTexture.USAGE_COPY_DST) == 0) {
+            throw new IllegalStateException("copyClipSource destination color texture lacks COPY_DST"
+                    + " (usage=0x" + Integer.toHexString(destinationColor.usage()) + ")");
+        }
+        // The live PIP color attachment is renderable and sampleable but has no
+        // COPY_SRC; blitFramebuffer handles that case through its hardware blit
+        // path. Any other non-copyable source is a contract violation.
+        if (!sourceUsesColorOverride
+                && (sourceColor.usage() & GpuTexture.USAGE_COPY_SRC) == 0) {
+            throw new IllegalStateException("copyClipSource source color texture lacks COPY_SRC"
+                    + " (usage=0x" + Integer.toHexString(sourceColor.usage()) + ")");
+        }
+
+        GpuTexture sourceDepth = src.getDepthTexture();
+        if (sourceIsMain && RenderSystem.outputDepthTextureOverride != null) {
+            sourceDepth = RenderSystem.outputDepthTextureOverride.texture();
+        }
+        GpuTexture destinationDepth = dst.getDepthTexture();
+        if (sourceDepth == null || destinationDepth == null) {
+            throw new IllegalStateException("copyClipSource requires depth attachments on both "
+                    + "source and destination");
+        }
+        if (sourceDepth.getWidth(0) != width || sourceDepth.getHeight(0) != height
+                || destinationDepth.getWidth(0) != width
+                || destinationDepth.getHeight(0) != height) {
+            throw new IllegalStateException("copyClipSource requires color and depth attachments to "
+                    + "share the same actual dimensions");
+        }
+        if ((sourceDepth.usage() & GpuTexture.USAGE_COPY_SRC) == 0) {
+            throw new IllegalStateException("copyClipSource source depth texture lacks COPY_SRC"
+                    + " (usage=0x" + Integer.toHexString(sourceDepth.usage()) + ")");
+        }
+        if ((destinationDepth.usage() & GpuTexture.USAGE_COPY_DST) == 0) {
+            throw new IllegalStateException("copyClipSource destination depth texture lacks COPY_DST"
+                    + " (usage=0x" + Integer.toHexString(destinationDepth.usage()) + ")");
+        }
+
+        blitFramebuffer(source, destination, 0, 0, width, height);
+        RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(
+                sourceDepth, destinationDepth, 0, 0, 0, 0, 0, width, height);
+    }
+
     @Override
     public void blitFramebuffer(FboHandle source, FboHandle target,
                                 int srcX0, int srcY0, int srcX1, int srcY1) {
@@ -850,8 +1105,8 @@ public final class RenderService implements KuiRenderService {
                 && copyH == destinationHeight;
         if (canCopy) {
             RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(
-                    sourceTexture, destinationTexture, boundedSrcX0, boundedSrcY0, 0,
-                    0, 0, copyW, copyH);
+                    sourceTexture, destinationTexture, 0, 0, 0,
+                    boundedSrcX0, boundedSrcY0, copyW, copyH);
             // Same attachment-visibility problem as the hardware blit below: the engine copy
             // writes through DSA framebuffers, and a later sample of the destination in the
             // same frame can still read its previous contents (blend/shadow/backdrop sources
@@ -967,6 +1222,48 @@ public final class RenderService implements KuiRenderService {
         if (gpuTexture == null) return;
         RenderSystem.getDevice().createCommandEncoder()
                 .writeToTexture(gpuTexture, (NativeImage) nativeImage, 0, 0, x, y, width, height, x, y);
+    }
+
+    @Override
+    public boolean uploadTexturePixels(Object texture, ByteBuffer pixels, int byteOffset,
+                                       int x, int y, int width, int height) {
+        if (pixels == null || !pixels.isDirect() || byteOffset < 0 || x < 0 || y < 0 || width <= 0 || height <= 0) return false;
+        DynamicTexture dynamic = (DynamicTexture) texture;
+        NativeImage image = dynamic.getPixels();
+        GpuTexture gpuTexture = dynamic.getTexture();
+        if (image == null || image.isClosed() || image.format() != NativeImage.Format.RGBA || gpuTexture == null) return false;
+
+        int imageWidth = image.getWidth();
+        int imageHeight = image.getHeight();
+        if (x > imageWidth - width || y > imageHeight - height) return false;
+        long sourceBytesLong = (long) width * height * 4L;
+        long imageBytesLong = (long) imageWidth * imageHeight * 4L;
+        if (sourceBytesLong > Integer.MAX_VALUE || imageBytesLong > Integer.MAX_VALUE
+                || byteOffset > pixels.limit() - sourceBytesLong) return false;
+        int sourceBytes = (int) sourceBytesLong;
+        int rowBytes = width * 4;
+
+        ByteBuffer source = pixels.duplicate();
+        source.position(byteOffset).limit(byteOffset + sourceBytes);
+        ByteBuffer upload = source.slice();
+        ByteBuffer imagePixels = MemoryUtil.memByteBuffer(image.getPointer(), (int) imageBytesLong);
+        ByteBuffer imageSource = upload.duplicate();
+        ByteBuffer imageDestination = imagePixels.duplicate();
+        for (int row = 0; row < height; row++) {
+            int sourceOffset = row * rowBytes;
+            int destinationOffset = ((y + row) * imageWidth + x) * 4;
+            imageSource.clear();
+            imageSource.position(sourceOffset).limit(sourceOffset + rowBytes);
+            imageDestination.clear();
+            imageDestination.position(destinationOffset).limit(destinationOffset + rowBytes);
+            imageDestination.put(imageSource);
+        }
+
+        // Keep DynamicTexture's NativeImage mirror in sync for dumpContents(), then upload
+        // from a bounded view; GlCommandEncoder consumes this ByteBuffer during the call.
+        RenderSystem.getDevice().createCommandEncoder().writeToTexture(
+                gpuTexture, upload, NativeImage.Format.RGBA, 0, 0, x, y, width, height);
+        return true;
     }
 
     @Override public void closeTexture(Object texture) { ((DynamicTexture) texture).close(); }

@@ -7,6 +7,7 @@ import io.github.kltyton.kltytonui.render.Drawer;
 import io.github.kltyton.kltytonui.init.Element;
 import io.github.kltyton.kltytonui.registry.annotation.ElementRegister;
 import io.github.kltyton.kltytonui.render.Base;
+import io.github.kltyton.kltytonui.render.DevicePixelGrid;
 import io.github.kltyton.kltytonui.render.ImageDrawer;
 import io.github.kltyton.kltytonui.render.Rect;
 import io.github.kltyton.kltytonui.layout.Box;
@@ -48,6 +49,8 @@ public class Canvas extends Element {
         return KuiServices.resources().textureLocation(key);
     }
     private boolean surfaceDirty = true;
+    private boolean repaintMarked;
+    private Graphics2D operationGraphics;
     // Accumulated dirty region in device pixels, empty when dirtyX1 <= dirtyX0.
     private int dirtyX0;
     private int dirtyY0;
@@ -62,6 +65,17 @@ public class Canvas extends Element {
         super(document, TAG_NAME);
         context2d = new CanvasRenderingContext2D(this);
         resizeSurface(bitmapWidth, bitmapHeight, false);
+    }
+
+    /**
+     * Device pixels per document CSS pixel for this element's document. Used only to snap
+     * texture quads to the device pixel grid; it is not a drawing or raster resize transform.
+     */
+    public double getDeviceScale() {
+        if (document == null || document.getViewport() == null) return 1.0d;
+        double scale = document.getViewport().scissorScale();
+        if (!(scale > 0.0d) || !Double.isFinite(scale)) return 1.0d;
+        return scale;
     }
 
     @Override
@@ -106,6 +120,14 @@ public class Canvas extends Element {
         setAttribute("height", Integer.toString(height));
     }
 
+    public int getBitmapWidth() {
+        return bitmapWidth;
+    }
+
+    public int getBitmapHeight() {
+        return bitmapHeight;
+    }
+
     public Size getIntrinsicSize() {
         return new Size(bitmapWidth, bitmapHeight);
     }
@@ -133,14 +155,24 @@ public class Canvas extends Element {
     public void renderOperation(Consumer<Graphics2D> action, Rectangle2D dirtyBounds) {
         if (action == null) return;
         ensureSurface();
-        Graphics2D g = surface.createGraphics();
+        if (operationGraphics == null) {
+            operationGraphics = surface.createGraphics();
+            applyGraphicsDefaults(operationGraphics);
+        }
+
+        Graphics2D g = (Graphics2D) operationGraphics.create();
         try {
-            applyGraphicsDefaults(g);
             action.accept(g);
         } finally {
             g.dispose();
         }
         markSurfaceDirty(dirtyBounds);
+    }
+
+    private void finishOperationGraphics() {
+        if (operationGraphics == null) return;
+        operationGraphics.dispose();
+        operationGraphics = null;
     }
 
     /** Marks the whole surface dirty (unknown or full-canvas change). */
@@ -181,7 +213,8 @@ public class Canvas extends Element {
         dirtyX1 = x1;
         dirtyY1 = y1;
         surfaceDirty = true;
-        if (document != null) {
+        if (document != null && !repaintMarked) {
+            repaintMarked = true;
             document.markDirty(this, Drawer.REPAINT);
         }
     }
@@ -300,14 +333,16 @@ public class Canvas extends Element {
         Size contentSize = Box.of(this).innerSize();
         if (contentSize.width() <= 0 || contentSize.height() <= 0) return;
 
+        double scale = getDeviceScale();
         ImageDrawer.draw(
                 poseStack,
                 textureLocation,
-                (float) contentPos.x,
-                (float) contentPos.y,
-                (float) contentSize.width(),
-                (float) contentSize.height(),
-                true
+                DevicePixelGrid.snap(contentPos.x, scale),
+                DevicePixelGrid.snap(contentPos.y, scale),
+                DevicePixelGrid.snap(contentSize.width(), scale),
+                DevicePixelGrid.snap(contentSize.height(), scale),
+                ImageDrawer.usesLinearFiltering(getComputedStyle(), contentSize.width(), contentSize.height(),
+                        bitmapWidth, bitmapHeight)
         );
     }
 
@@ -316,6 +351,7 @@ public class Canvas extends Element {
         int newHeight = parseDimension(getAttributes().get("height"), DEFAULT_HEIGHT);
         resizeSurface(newWidth, newHeight, true);
         if (notifyLayout && document != null) {
+            repaintMarked = true;
             document.markDirty(this, Drawer.RELAYOUT | Drawer.REPAINT);
         }
     }
@@ -325,6 +361,8 @@ public class Canvas extends Element {
         int safeHeight = Math.max(1, height);
         if (surface != null && bitmapWidth == safeWidth && bitmapHeight == safeHeight) return;
 
+        finishOperationGraphics();
+        repaintMarked = false;
         bitmapWidth = safeWidth;
         bitmapHeight = safeHeight;
         surface = new BufferedImage(bitmapWidth, bitmapHeight, BufferedImage.TYPE_INT_ARGB);
@@ -340,8 +378,12 @@ public class Canvas extends Element {
     }
 
     protected void syncTexture() {
+        finishOperationGraphics();
         ensureSurface();
-        if (!surfaceDirty && textureLocation != null && texture != null && nativeImage != null) return;
+        if (!surfaceDirty && textureLocation != null && texture != null && nativeImage != null) {
+            repaintMarked = false;
+            return;
+        }
 
         boolean fullUpload = false;
         if (nativeImage == null || texture == null || textureLocation == null
@@ -374,6 +416,7 @@ public class Canvas extends Element {
             KuiServices.render().uploadTextureRegion(texture, nativeImage, x0, y0, x1 - x0, y1 - y0, true);
         }
         surfaceDirty = false;
+        repaintMarked = false;
         dirtyX0 = 0;
         dirtyY0 = 0;
         dirtyX1 = 0;

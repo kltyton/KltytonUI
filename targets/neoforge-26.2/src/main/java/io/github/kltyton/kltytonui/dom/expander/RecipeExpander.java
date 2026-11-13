@@ -45,8 +45,138 @@ public final class RecipeExpander {
         ArrayList<Element> snapshot = new ArrayList<>(document.getElements());
         for (Element element : snapshot) {
             if (!(element instanceof Recipe recipe)) continue;
-            expandSingleRecipe(document, recipe);
+            recipe.previewState.update(recipe, System.nanoTime() / 1_000_000L, true);
         }
+    }
+
+    public static final class PreviewState {
+        private String text;
+        private String output;
+        private String type;
+        private RecipeResolver.QueryMode queryMode;
+        private Object level;
+        private RecipeManager manager;
+        private long revision = -1;
+        private List<RecipeResolver.ResolveResult> candidates = List.of();
+        private boolean outputMode;
+        private int index;
+        private long nextRotateAt;
+        private boolean paused;
+        private boolean invalidated;
+
+        public void invalidate() {
+            invalidated = true;
+        }
+
+        public void update(Recipe recipe, long now, boolean force) {
+            Minecraft minecraft = Minecraft.getInstance();
+            Object currentLevel = minecraft == null ? null : minecraft.level;
+            MinecraftServer server = minecraft == null ? null : minecraft.getSingleplayerServer();
+            RecipeManager currentManager = server == null ? null : server.getRecipeManager();
+            String currentText = recipe.innerText;
+            String currentOutput = recipe.getAttribute("output");
+            String currentType = recipe.getAttribute("type");
+            RecipeResolver.QueryMode currentQueryMode = currentOutput == null
+                    ? RecipeResolver.QueryMode.LEGACY_TEXT : RecipeResolver.QueryMode.OUTPUT_ATTRIBUTE;
+            long currentRevision = RecipeResolver.revision;
+            if (force || invalidated || level != currentLevel || manager != currentManager || revision != currentRevision
+                    || !Objects.equals(text, currentText) || !Objects.equals(output, currentOutput)
+                    || !Objects.equals(type, currentType) || queryMode != currentQueryMode) {
+                level = currentLevel;
+                manager = currentManager;
+                revision = currentRevision;
+                text = currentText;
+                output = currentOutput;
+                type = currentType;
+                queryMode = currentQueryMode;
+                index = 0;
+                nextRotateAt = now + 1000L;
+                paused = false;
+                invalidated = false;
+                outputMode = false;
+                candidates = List.of();
+
+                RecipeResolver.DeclaredType declaredType = RecipeResolver.DeclaredType.fromRaw(type);
+                if (currentOutput != null) {
+                    if (declaredType == null) {
+                        renderOutputPreview(recipe, null, null, "Recipe preview skipped: missing/invalid type");
+                        outputMode = true;
+                        return;
+                    }
+                    Identifier outputItemId = recipe.parseOutputItemId();
+                    if (outputItemId == null) {
+                        renderOutputPreview(recipe, declaredType, null,
+                                "Recipe preview skipped: invalid output item id in output attribute");
+                        outputMode = true;
+                        return;
+                    }
+                    RecipeResolver.ResolveBatch batch = RecipeResolver.resolveBatch(
+                            outputItemId, declaredType, RecipeResolver.QueryMode.OUTPUT_ATTRIBUTE);
+                    candidates = batch.previews();
+                    outputMode = true;
+                    renderOutputPreview(recipe, declaredType, candidates.isEmpty() ? null : candidates.get(0), batch.message());
+                    return;
+                }
+
+                if (declaredType != null) {
+                    Identifier recipeId = recipe.parseRecipeIdFromInnerText();
+                    if (recipeId != null) {
+                        RecipeResolver.ResolveResult legacy = RecipeResolver.resolve(recipeId, declaredType);
+                        if (legacy.absoluteEntries().isEmpty() && legacy.listEntries().isEmpty()
+                                && "Recipe not found".equals(legacy.message())) {
+                            Identifier outputItemId = recipe.parseOutputItemId();
+                            if (outputItemId != null) {
+                                RecipeResolver.ResolveBatch batch = RecipeResolver.resolveBatch(
+                                        outputItemId, declaredType, RecipeResolver.QueryMode.LEGACY_OUTPUT_FALLBACK);
+                                if (!batch.previews().isEmpty()) {
+                                    candidates = batch.previews();
+                                    outputMode = true;
+                                    renderOutputPreview(recipe, declaredType, candidates.get(0), batch.message());
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                expandSingleRecipe(recipe.document, recipe);
+                return;
+            }
+            if (outputMode && advance(now, recipe.isHover)) {
+                renderOutputPreview(recipe, RecipeResolver.DeclaredType.fromRaw(type), candidates.get(index), "");
+            }
+        }
+
+        boolean advance(long now, boolean hovered) {
+            if (hovered || paused) {
+                nextRotateAt = now + 1000L;
+                paused = hovered;
+                return false;
+            }
+            if (candidates.size() <= 1 || now < nextRotateAt) return false;
+            index = (index + 1) % candidates.size();
+            nextRotateAt = now + 1000L;
+            return true;
+        }
+    }
+
+    private static void renderOutputPreview(Recipe recipe, RecipeResolver.DeclaredType type,
+                                            RecipeResolver.ResolveResult preview, String message) {
+        boolean changed = recipe.clearGeneratedRecipeSlots();
+        changed |= setAttributeIfChanged(recipe, "data-recipe-type", type == null ? "" : type.id());
+        changed |= setAttributeIfChanged(recipe, "data-recipe-layout",
+                preview == null ? "" : preview.layoutKind().name().toLowerCase(Locale.ROOT));
+        if (preview == null && !Objects.equals(recipe.getAttribute("data-recipe-error"), message)) {
+            KltytonUI.LOGGER.warn("{}, type={}, output={}", message, recipe.getAttribute("type"), recipe.getOutputItemExpression());
+        }
+        changed |= setAttributeIfChanged(recipe, "data-recipe-error", preview == null ? message : "");
+        if (preview != null) {
+            EnumMap<RecipeResolver.PreviewRole, Integer> cursor = new EnumMap<>(RecipeResolver.PreviewRole.class);
+            for (RecipeResolver.PreviewEntry entry : preview.absoluteEntries()) {
+                appendPreviewSlot(recipe.document, recipe, entry, nextRoleIndex(cursor, entry.role()), "absolute");
+                changed = true;
+            }
+        }
+        if (changed) recipe.document.markDirty(recipe, Drawer.RELAYOUT | Drawer.REORDER);
     }
 
     private static void expandSingleRecipe(Document document, Recipe recipe) {
@@ -142,6 +272,15 @@ public final class RecipeExpander {
             Document document,
             Recipe recipe,
             RecipeResolver.PreviewEntry entry,
+            int roleIndex
+    ) {
+        appendPreviewSlot(document, recipe, entry, roleIndex, "absolute");
+    }
+
+    private static void appendPreviewSlot(
+            Document document,
+            Recipe recipe,
+            RecipeResolver.PreviewEntry entry,
             int roleIndex,
             String group
     ) {
@@ -207,15 +346,34 @@ public final class RecipeExpander {
                         return size() > MAX_CACHE_SIZE;
                     }
                 };
+        private static final LinkedHashMap<OutputCacheKey, ResolveBatch> OUTPUT_CACHE =
+                new LinkedHashMap<OutputCacheKey, ResolveBatch>(64, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<OutputCacheKey, ResolveBatch> eldest) {
+                        return size() > MAX_CACHE_SIZE;
+                    }
+                };
 
         private RecipeResolver() {
         }
+
+        private static volatile long revision;
+        private static Object cachedLevel;
+        private static RecipeManager cachedManager;
+
+        private enum QueryMode { LEGACY_TEXT, OUTPUT_ATTRIBUTE, LEGACY_OUTPUT_FALLBACK }
 
         public static synchronized ResolveResult resolve(Identifier recipeId, DeclaredType declaredType) {
             if (recipeId == null || declaredType == null) {
                 return ResolveResult.empty("Recipe cache key is invalid");
             }
-            RecipeCacheKey cacheKey = new RecipeCacheKey(recipeId, declaredType);
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft == null || minecraft.level == null) return ResolveResult.empty("Client level is not available");
+            MinecraftServer server = minecraft.getSingleplayerServer();
+            RecipeManager manager = server == null ? null : server.getRecipeManager();
+            if (manager == null) return ResolveResult.empty("Recipe manager is not available (singleplayer only)");
+            invalidateForManager(minecraft, manager);
+            RecipeCacheKey cacheKey = new RecipeCacheKey(recipeId, declaredType, QueryMode.LEGACY_TEXT);
             ResolveResult cached = CACHE.get(cacheKey);
             if (cached != null) return cached;
             ResolveResult resolved = buildPreview(recipeId, declaredType);
@@ -223,9 +381,54 @@ public final class RecipeExpander {
             return resolved;
         }
 
+        public static synchronized ResolveBatch resolveBatch(Identifier outputItemId, DeclaredType declaredType) {
+            return resolveBatch(outputItemId, declaredType, QueryMode.OUTPUT_ATTRIBUTE);
+        }
+
+        private static synchronized ResolveBatch resolveBatch(
+                Identifier outputItemId, DeclaredType declaredType, QueryMode queryMode) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft == null || minecraft.level == null) return ResolveBatch.empty("Client level is not available");
+            MinecraftServer server = minecraft.getSingleplayerServer();
+            RecipeManager manager = server == null ? null : server.getRecipeManager();
+            if (manager == null) return ResolveBatch.empty("Recipe manager is not available (singleplayer only)");
+            invalidateForManager(minecraft, manager);
+            OutputCacheKey key = new OutputCacheKey(outputItemId, declaredType, queryMode);
+            ResolveBatch cached = OUTPUT_CACHE.get(key);
+            if (cached != null) return cached;
+            ContextMap context = SlotDisplayContext.fromLevel(minecraft.level);
+            ArrayList<ResolveResult> previews = new ArrayList<>();
+            manager.getRecipes().stream().filter(holder -> declaredType.matches(holder.value()))
+                    .sorted(Comparator.comparing(holder -> holder.id().identifier().toString()))
+                    .forEach(holder -> {
+                        for (RecipeDisplay display : holder.value().display()) {
+                            ItemStack result = display.result().resolveForFirstStack(context);
+                            if (result.isEmpty() || !outputItemId.equals(BuiltInRegistries.ITEM.getKey(result.getItem()))) continue;
+                            ResolveResult preview = buildPreview(display, declaredType, context);
+                            if (!preview.absoluteEntries().isEmpty()) previews.add(preview);
+                        }
+                    });
+            ResolveBatch batch = previews.isEmpty() ? ResolveBatch.empty("No recipes match the output item and type")
+                    : new ResolveBatch(List.copyOf(previews), "");
+            OUTPUT_CACHE.put(key, batch);
+            return batch;
+        }
+
+        private static void invalidateForManager(Minecraft minecraft, RecipeManager manager) {
+            if (cachedLevel == minecraft.level && cachedManager == manager) return;
+            CACHE.clear();
+            OUTPUT_CACHE.clear();
+            cachedLevel = minecraft.level;
+            cachedManager = manager;
+        }
+
         public static synchronized void clearCache() {
             CACHE.clear();
+            OUTPUT_CACHE.clear();
             IngredientExpressionCompiler.clearTagCache();
+            cachedLevel = null;
+            cachedManager = null;
+            revision++;
         }
 
         private static ResolveResult buildPreview(Identifier recipeId, DeclaredType declaredType) {
@@ -274,6 +477,22 @@ public final class RecipeExpander {
             }
 
             return new ResolveResult(layoutKind, List.copyOf(absoluteEntries), List.copyOf(listEntries), "");
+        }
+
+        private static ResolveResult buildPreview(RecipeDisplay display, DeclaredType declaredType, ContextMap context) {
+            ArrayList<PreviewEntry> absoluteEntries = new ArrayList<>();
+            LayoutKind layoutKind = declaredType.layoutKind();
+
+            switch (declaredType) {
+                case CRAFTING_SHAPED -> buildShapedCraftingEntries(display, absoluteEntries, context);
+                case CRAFTING_SHAPELESS -> buildShapelessCraftingEntries(display, absoluteEntries, context);
+                case SMELTING, BLASTING, SMOKING, CAMPFIRE_COOKING -> buildCookingEntries(display, absoluteEntries, context);
+                case STONECUTTING -> buildStonecuttingEntries(display, absoluteEntries, context);
+                case SMITHING -> buildSmithingEntries(display, absoluteEntries, context);
+                case FALLBACK -> buildFallbackEntries(display, absoluteEntries, context);
+            }
+
+            return new ResolveResult(layoutKind, List.copyOf(absoluteEntries), List.of(), "");
         }
 
         private static void buildShapedCraftingEntries(
@@ -341,6 +560,17 @@ public final class RecipeExpander {
 
             PreviewEntry resultEntry = toEntryFromDisplay(furnace.result(), context, PreviewRole.OUTPUT);
             if (resultEntry != null) output.add(resultEntry);
+        }
+
+        private static void buildStonecuttingEntries(RecipeDisplay display, List<PreviewEntry> output, ContextMap context) {
+            if (!(display instanceof StonecutterRecipeDisplay stonecutter)) {
+                buildFallbackEntries(display, output, context);
+                return;
+            }
+            PreviewEntry input = toIngredientEntry(stonecutter.input(), context, PreviewRole.INPUT);
+            if (input != null) output.add(input);
+            PreviewEntry result = toEntryFromDisplay(stonecutter.result(), context, PreviewRole.OUTPUT);
+            if (result != null) output.add(result);
         }
 
         private static void buildStonecuttingEntries(
@@ -465,8 +695,7 @@ public final class RecipeExpander {
             if (stack == null || stack.isEmpty()) return null;
             Identifier itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
             if (itemId == null) return null;
-            int count = Math.max(1, stack.getCount());
-            String expression = ItemStackExpressionCompiler.withCount(itemId.toString(), count);
+            String expression = ItemStackExpressionCompiler.serialize(stack);
             return new PreviewEntry(role, expression);
         }
 
@@ -637,7 +866,16 @@ public final class RecipeExpander {
             }
         }
 
-        private record RecipeCacheKey(Identifier recipeId, DeclaredType declaredType) {
+        public record ResolveBatch(List<ResolveResult> previews, String message) {
+            public static ResolveBatch empty(String message) {
+                return new ResolveBatch(List.of(), message);
+            }
+        }
+
+        private record RecipeCacheKey(Identifier recipeId, DeclaredType declaredType, QueryMode queryMode) {
+        }
+
+        private record OutputCacheKey(Identifier outputItemId, DeclaredType declaredType, QueryMode queryMode) {
         }
     }
 }

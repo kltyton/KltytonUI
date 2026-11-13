@@ -5,6 +5,8 @@ tasks.named('javadoc', Javadoc).configure {
     options.encoding = 'UTF-8'
     options.docEncoding = 'UTF-8'
     options.charSet = 'UTF-8'
+    exclude '**/ClientRuntimeSelfTest.java', '**/ClientWptSnapshotRunner.java',
+            '**/WorldWindowTestSpawner.java', '**/SelectionChurnRunner.java', '**/DevOverlayVerificationRunner.java'
 }
 
 def mavenJavadocJar = tasks.register('mavenJavadocJar', Jar) {
@@ -29,12 +31,20 @@ dependencies {
 // referenced by relative path instead of project(':common').
 sourceSets.main.resources.srcDir file('../../common/src/main/resources')
 
-// Ship the English documentation inside the mod jar at the jar root, next to
-// assets/ (e.g. docs/en/getting-started.md).
-tasks.named('processResources', ProcessResources).configure {
-    from('../../docs/en') {
-        into 'docs/en'
-    }
+// Archive exclusions also cover stale files left in resource output directories.
+tasks.withType(Jar).configureEach {
+    exclude '**/ai-skill.md', '**/agent.md', '**/SKILL.md', '**/AGENTS.md', '**/AGENTS.override.md',
+            '**/CLAUDE.md', '**/GEMINI.md', '**/.omo/**', '**/.codex/**', '**/.agents/**'
+    exclude 'assets/kltytonui/kltytonui/tests/**', '**/readme.md', '**/README.md'
+    exclude 'assets/kltytonui/kltytonui/**/*.md', 'assets/kltytonui/kltytonui/**/*example*.html'
+    exclude '**/ClientRuntimeSelfTest*', '**/ClientWptSnapshotRunner*', '**/WorldWindowTestSpawner*'
+    exclude '**/SelectionChurnRunner*', '**/DevOverlayVerificationRunner*'
+    exclude 'docs/**', 'de/bluecolored/bluemap/**'
+    exclude 'io/github/kltyton/kltytonui/native/v8/**', 'io/github/kltyton/kltytonui/script/v8/**'
+    exclude 'io/github/kltyton/kltytonui/script/graal/**', 'assets/kltytonui/kltytonui/runtime/graal/**'
+    exclude 'assets/kltytonui/kltytonui/runtime/v8/**', 'META-INF/javet/**', 'libjavet-*'
+    exclude 'META-INF/jarjar/javet-*.jar', 'META-INF/jars/javet-*.jar'
+    exclude 'META-INF/jarjar/xz-1.12.jar', 'META-INF/jars/xz-1.12.jar'
 }
 
 def publishLoader = project.projectDir.name.tokenize('-').first()

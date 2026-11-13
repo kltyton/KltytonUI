@@ -2,7 +2,9 @@ package io.github.kltyton.kltytonui.fabric;
 
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
+import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.platform.DestFactor;
 import com.mojang.blaze3d.platform.SourceFactor;
 import com.mojang.blaze3d.shaders.UniformType;
@@ -29,6 +31,7 @@ public final class PipelineRegistry {
     private static volatile RenderPipeline filterBlurPipeline;
     private static volatile RenderPipeline filterBlendPipeline;
     private static volatile RenderPipeline filterCopyPipeline;
+    private static volatile RenderPipeline clipLayerPipeline;
     private static volatile RenderPipeline filterMaskPipeline;
     private static volatile RenderPipeline filterMaskLumPipeline;
     private static volatile RenderPipeline filterMaskIntersectPipeline;
@@ -49,6 +52,7 @@ public final class PipelineRegistry {
         getFilterBlur();
         getFilterBlend();
         getFilterCopy();
+        getClipLayer();
         getFilterMask();
         getFilterMaskLum();
         getFilterMaskIntersect();
@@ -95,6 +99,35 @@ public final class PipelineRegistry {
             filterCopyPipeline = p;
         }
         return p;
+    }
+
+    /**
+     * Restores a clip layer's color and depth through rounded/polygon mask
+     * geometry. Sampler0 is the layer color, Sampler1 its depth; the fragment
+     * shader writes the sampled color and {@code gl_FragDepth} unchanged.
+     */
+    public static RenderPipeline getClipLayer() {
+        RenderPipeline p = clipLayerPipeline;
+        if (p == null) {
+            p = buildClipLayer();
+            clipLayerPipeline = p;
+        }
+        return p;
+    }
+
+    private static RenderPipeline buildClipLayer() {
+        Identifier shader = Identifier.fromNamespaceAndPath("kltytonui", "core/clip_layer");
+        return RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET)
+                .withLocation(Identifier.fromNamespaceAndPath("kltytonui", "pipeline/clip_layer"))
+                .withVertexShader(shader)
+                .withFragmentShader(shader)
+                .withSampler("Sampler0")
+                .withSampler("Sampler1")
+                .withVertexFormat(DefaultVertexFormat.POSITION, VertexFormat.Mode.TRIANGLES)
+                .withDepthStencilState(new DepthStencilState(CompareOp.ALWAYS_PASS, true))
+                .withColorTargetState(new ColorTargetState(Optional.empty(), ColorTargetState.WRITE_ALL))
+                .withCull(false)
+                .build();
     }
 
     private static RenderPipeline buildFilter(boolean blur) {

@@ -24,6 +24,7 @@ public class Mask {
     private static final Stack<MaskMode> clipPathModeStack = new Stack<>();
     private static final Stack<AABB> clipPathScissorStack = new Stack<>();
     private static final Stack<SurfaceClipState> surfaceClipStack = new Stack<>();
+    private static final Stack<Integer> scratchStencilDepthStack = new Stack<>();
     private static final ThreadLocal<ArrayDeque<ScissorScaleState>> scissorScaleStack = ThreadLocal.withInitial(ArrayDeque::new);
     private static final ThreadLocal<Integer> forceStencilDepth = ThreadLocal.withInitial(() -> 0);
     private static AABB currentScissor = null;
@@ -51,12 +52,131 @@ public class Mask {
         clipPathModeStack.clear();
         clipPathScissorStack.clear();
         surfaceClipStack.clear();
+        scratchStencilDepthStack.clear();
         currentScissor = null;
         surfaceScissorTransform = null;
         disableScissor();
         currentClip = new AABB(0, 0,
                 (float) Math.max(1.0d, width),
                 (float) Math.max(1.0d, height));
+    }
+
+    /**
+     * Saves the current KUI clip state and starts an offscreen target's stencil
+     * depth at zero. The caller must enter before binding the child target and
+     * restore only after rebinding the parent target. Parent scissor state stays
+     * active while the child is rendered.
+     */
+    static TargetStencilState enterOffscreenTarget() {
+        TargetStencilState state = new TargetStencilState(
+                depth,
+                copyStack(clipStack),
+                copyStack(scissorStack),
+                copyStack(maskModeStack),
+                copyStack(clipPathModeStack),
+                copyStack(clipPathScissorStack),
+                copyStack(surfaceClipStack),
+                new ArrayDeque<>(scissorScaleStack.get()),
+                copyStack(scratchStencilDepthStack),
+                forceStencilDepth.get(),
+                currentScissor,
+                currentClip,
+                surfaceScissorTransform
+        );
+        depth = 0;
+        try {
+            KuiServices.render().disableStencilTest();
+            return state;
+        } catch (RuntimeException | Error failure) {
+            try {
+                restoreTargetStencil(state);
+            } catch (RuntimeException | Error restoreFailure) {
+                failure.addSuppressed(restoreFailure);
+            }
+            throw failure;
+        }
+    }
+
+    /**
+     * Restores an offscreen target's parent state after its target is rebound.
+     * The saved state is immutable, so callers may repeat this from a {@code finally} block.
+     */
+    static void restoreTargetStencil(TargetStencilState state) {
+        depth = state.depth;
+        restoreStack(clipStack, state.clipStack);
+        restoreStack(scissorStack, state.scissorStack);
+        restoreStack(maskModeStack, state.maskModeStack);
+        restoreStack(clipPathModeStack, state.clipPathModeStack);
+        restoreStack(clipPathScissorStack, state.clipPathScissorStack);
+        restoreStack(surfaceClipStack, state.surfaceClipStack);
+        restoreStack(scratchStencilDepthStack, state.scratchStencilDepthStack);
+        if (state.scissorScaleStack.isEmpty()) scissorScaleStack.remove();
+        else scissorScaleStack.set(new ArrayDeque<>(state.scissorScaleStack));
+        if (state.forceStencilDepth == 0) forceStencilDepth.remove();
+        else forceStencilDepth.set(state.forceStencilDepth);
+        currentScissor = state.currentScissor;
+        currentClip = state.currentClip;
+        surfaceScissorTransform = state.surfaceScissorTransform;
+
+        try {
+            if (currentScissor == null) disableScissor();
+            else applyScissor(currentScissor);
+        } finally {
+            applyStencilStateForDepth(depth);
+        }
+    }
+
+    /**
+     * Disables KUI stencil testing while drawing a no-depth scratch target.
+     * Pair with {@link #restoreStencilForScratch()} after rebinding the prior target;
+     * do not change the Mask stack while the suspension is active.
+     */
+    static void suspendStencilForScratch() {
+        int savedDepth = depth;
+        scratchStencilDepthStack.push(savedDepth);
+        try {
+            KuiServices.render().disableStencilTest();
+        } catch (RuntimeException | Error failure) {
+            scratchStencilDepthStack.pop();
+            try {
+                applyStencilStateForDepth(savedDepth);
+            } catch (RuntimeException | Error restoreFailure) {
+                failure.addSuppressed(restoreFailure);
+            }
+            throw failure;
+        }
+    }
+
+    /** Restores stencil testing after the caller has rebound its previous target. */
+    static void restoreStencilForScratch() {
+        int savedDepth = scratchStencilDepthStack.peek();
+        if (depth != savedDepth) {
+            throw new IllegalStateException("Mask depth changed while stencil was suspended for a scratch target");
+        }
+        applyStencilStateForDepth(savedDepth);
+        scratchStencilDepthStack.pop();
+    }
+
+    private static void applyStencilStateForDepth(int targetDepth) {
+        if (targetDepth > 0) {
+            KuiServices.render().enableStencilTest();
+            KuiServices.render().setStencilFunc(GL11.GL_EQUAL, targetDepth, 0xFF);
+            KuiServices.render().setStencilMask(0x00);
+        } else {
+            KuiServices.render().disableStencilTest();
+            KuiServices.render().setStencilMask(0xFF);
+        }
+    }
+
+    private static <T> Stack<T> copyStack(Stack<T> source) {
+        Stack<T> copy = new Stack<>();
+        copy.addAll(source);
+        return copy;
+    }
+
+    private static <T> void restoreStack(Stack<T> target, Stack<T> saved) {
+        target.clear();
+        target.addAll(saved);
     }
 
     public static AABB getCurrentClip() {
@@ -196,10 +316,17 @@ public class Mask {
         float[] local = resolveLocalScissorTransform(
                 poseMatrix.m00(), poseMatrix.m01(), poseMatrix.m10(), poseMatrix.m11(),
                 poseMatrix.m20(), poseMatrix.m21(), poseMatrix.m30(), poseMatrix.m31());
-        MaskMode mode = !stencilUsable()
-                ? (forced ? MaskMode.NONE : MaskMode.SCISSOR)
-                : (!forced && isRectMask(radii) && local != null
-                        ? MaskMode.SCISSOR : MaskMode.STENCIL);
+        MaskMode mode = !forced && isRectMask(radii) && local != null
+                ? MaskMode.SCISSOR
+                : shapeMaskMode(forced);
+        if (mode == MaskMode.LAYER) {
+            FilterRenderer.pushClipLayer();
+            // The offscreen snapshot must precede this layer's stack entries.
+            maskModeStack.push(mode);
+            clipStack.push(currentClip);
+            currentClip = currentClip.intersection(new AABB(x, y, width, height));
+            return;
+        }
         maskModeStack.push(mode);
         if (mode == MaskMode.SCISSOR) {
             Base.commitDraws();
@@ -242,6 +369,11 @@ public class Mask {
 
     public static void popMask(PoseStack pose, float x, float y, float width, float height, float[] radii) {
         MaskMode mode = maskModeStack.isEmpty() ? MaskMode.STENCIL : maskModeStack.pop();
+        if (mode == MaskMode.LAYER) {
+            FilterRenderer.popClipLayer(() -> drawRoundedMask(
+                    PoseMatrices.of(pose), x, y, width, height, radii, false));
+            return;
+        }
         if (mode == MaskMode.SCISSOR) {
             Base.commitDraws();
             if (!clipStack.isEmpty()) currentClip = clipStack.pop();
@@ -269,14 +401,20 @@ public class Mask {
     }
 
     private static void drawToStencil(Matrix4f matrix, float x, float y, float width, float height, float[] radii) {
+        drawRoundedMask(matrix, x, y, width, height, radii, true);
+    }
+
+    private static void drawRoundedMask(Matrix4f matrix, float x, float y, float width, float height,
+                                        float[] radii, boolean stencilShader) {
         MeshBuilder mesh = io.github.kltyton.kltytonui.spi.KuiServices.render().beginMesh(MeshMode.TRIANGLES, MeshFormat.POSITION);
         Base.setMesh(mesh);
-        Base.setPositionColorShader();
-        Graph.addUnifiedRoundedRectVertices(mesh, matrix, x, y, width, height, radii, 0xFFFFFFFF);
-        mesh.submit();
-        // Keep currentMesh authoritative: a finalized builder must not linger as
-        // the "current" mesh for a later batch (1.21 allocates fresh builders).
-        Base.setMesh(null);
+        try {
+            if (stencilShader) Base.setPositionColorShader();
+            Graph.addUnifiedRoundedRectVertices(mesh, matrix, x, y, width, height, radii, 0xFFFFFFFF);
+            mesh.submit();
+        } finally {
+            Base.setMesh(null);
+        }
     }
 
     private static StencilDepthState setupStencilStatePush() {
@@ -327,9 +465,14 @@ public class Mask {
     public static void pushClipPath(PoseStack pose, float x, float y, float width, float height,
                                     String clipPathValue, boolean forceStencil) {
         boolean forced = forceStencil || forceStencilDepth.get() > 0;
-        MaskMode mode = !stencilUsable()
-                ? (forced ? MaskMode.NONE : MaskMode.SCISSOR)
-                : MaskMode.STENCIL;
+        MaskMode mode = shapeMaskMode(forced);
+        if (mode == MaskMode.LAYER) {
+            FilterRenderer.pushClipLayer();
+            clipPathModeStack.push(mode);
+            clipStack.push(currentClip);
+            currentClip = currentClip.intersection(new AABB(x, y, width, height));
+            return;
+        }
         clipPathModeStack.push(mode);
 
         clipStack.push(currentClip);
@@ -371,6 +514,11 @@ public class Mask {
 
     public static void popClipPath(PoseStack pose, float x, float y, float width, float height, String clipPathValue) {
         MaskMode mode = clipPathModeStack.isEmpty() ? MaskMode.STENCIL : clipPathModeStack.pop();
+        if (mode == MaskMode.LAYER) {
+            FilterRenderer.popClipLayer(() -> drawClipMask(
+                    PoseMatrices.of(pose), x, y, width, height, clipPathValue, false));
+            return;
+        }
         if (mode == MaskMode.SCISSOR) {
             Base.commitDraws();
             if (!clipStack.isEmpty()) currentClip = clipStack.pop();
@@ -410,13 +558,20 @@ public class Mask {
     }
 
     private static void drawClipToStencil(Matrix4f matrix, float x, float y, float width, float height, String clipPath) {
+        drawClipMask(matrix, x, y, width, height, clipPath, true);
+    }
+
+    private static void drawClipMask(Matrix4f matrix, float x, float y, float width, float height,
+                                     String clipPath, boolean stencilShader) {
         MeshBuilder mesh = io.github.kltyton.kltytonui.spi.KuiServices.render().beginMesh(MeshMode.TRIANGLES, MeshFormat.POSITION);
         Base.setMesh(mesh);
-        Base.setPositionColorShader();
-        ClipPath.drawToStencil(matrix, x, y, width, height, clipPath);
-        mesh.submit();
-        // See drawToStencil: never leave a finalized builder as currentMesh.
-        Base.setMesh(null);
+        try {
+            if (stencilShader) Base.setPositionColorShader();
+            ClipPath.drawToStencil(matrix, x, y, width, height, clipPath);
+            mesh.submit();
+        } finally {
+            Base.setMesh(null);
+        }
     }
 
     public static void enableScissor(double x, double y, double width, double height) {
@@ -493,12 +648,57 @@ public class Mask {
         enableScissor(rect.x(), rect.y(), rect.width(), rect.height());
     }
 
+    static final class TargetStencilState {
+        private final int depth;
+        private final Stack<AABB> clipStack;
+        private final Stack<AABB> scissorStack;
+        private final Stack<MaskMode> maskModeStack;
+        private final Stack<MaskMode> clipPathModeStack;
+        private final Stack<AABB> clipPathScissorStack;
+        private final Stack<SurfaceClipState> surfaceClipStack;
+        private final ArrayDeque<ScissorScaleState> scissorScaleStack;
+        private final Stack<Integer> scratchStencilDepthStack;
+        private final int forceStencilDepth;
+        private final AABB currentScissor;
+        private final AABB currentClip;
+        private final SurfaceScissorTransform surfaceScissorTransform;
+
+        private TargetStencilState(int depth,
+                                   Stack<AABB> clipStack,
+                                   Stack<AABB> scissorStack,
+                                   Stack<MaskMode> maskModeStack,
+                                   Stack<MaskMode> clipPathModeStack,
+                                   Stack<AABB> clipPathScissorStack,
+                                   Stack<SurfaceClipState> surfaceClipStack,
+                                   ArrayDeque<ScissorScaleState> scissorScaleStack,
+                                   Stack<Integer> scratchStencilDepthStack,
+                                   int forceStencilDepth,
+                                   AABB currentScissor,
+                                   AABB currentClip,
+                                   SurfaceScissorTransform surfaceScissorTransform) {
+            this.depth = depth;
+            this.clipStack = clipStack;
+            this.scissorStack = scissorStack;
+            this.maskModeStack = maskModeStack;
+            this.clipPathModeStack = clipPathModeStack;
+            this.clipPathScissorStack = clipPathScissorStack;
+            this.surfaceClipStack = surfaceClipStack;
+            this.scissorScaleStack = scissorScaleStack;
+            this.scratchStencilDepthStack = scratchStencilDepthStack;
+            this.forceStencilDepth = forceStencilDepth;
+            this.currentScissor = currentScissor;
+            this.currentClip = currentClip;
+            this.surfaceScissorTransform = surfaceScissorTransform;
+        }
+    }
+
     private record SurfaceClipState(AABB clip, AABB scissor, SurfaceScissorTransform transform) {
     }
 
     private enum MaskMode {
         SCISSOR,
         STENCIL,
+        LAYER,
         NONE
     }
 
@@ -616,5 +816,11 @@ public class Mask {
      */
     private static boolean stencilUsable() {
         return FilterRenderer.isStencilAvailable() && KuiServices.render().currentTargetHasStencil();
+    }
+
+    private static MaskMode shapeMaskMode(boolean forced) {
+        if (stencilUsable()) return MaskMode.STENCIL;
+        if (KuiServices.render().usesClipLayers()) return MaskMode.LAYER;
+        return forced ? MaskMode.NONE : MaskMode.SCISSOR;
     }
 }

@@ -302,6 +302,22 @@ public final class WebViewNative {
 
     // --- native entry points -------------------------------------------------
 
+    public static void enableBridge(long handle, boolean enabled) {
+        if (AVAILABLE && handle != 0L) nEnableBridge(handle, enabled);
+    }
+
+    public static String[] drainMessages(long handle) {
+        return AVAILABLE && handle != 0L ? nDrainMessages(handle) : new String[0];
+    }
+
+    public static boolean postMessage(long handle, long generation, String json) {
+        return AVAILABLE && handle != 0L && json != null && nPostMessage(handle, generation, json);
+    }
+
+    private static native void nEnableBridge(long handle, boolean enabled);
+    private static native String[] nDrainMessages(long handle);
+    private static native boolean nPostMessage(long handle, long generation, String json);
+
     private static native boolean nAvailable();
 
     private static native String nBrowserVersion();

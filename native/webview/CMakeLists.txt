@@ -7,7 +7,8 @@ endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+# Keep the host's STL independent of an older MSVC runtime already loaded by the JVM.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # NuGet layout of Microsoft.Web.WebView2: <root>/build/native/{include,x64}
 set(WEBVIEW2_SDK_DIR "" CACHE PATH "Path to the extracted Microsoft.Web.WebView2 package")
@@ -70,6 +71,7 @@ target_link_libraries(kltytonui_webview PRIVATE
         dxgi.lib
         winmm.lib
         windowsapp.lib)
+target_link_libraries(kltytonui_webview PRIVATE CoreMessaging.lib RuntimeObject.lib)
 
 set_target_properties(kltytonui_webview PROPERTIES
         PREFIX ""

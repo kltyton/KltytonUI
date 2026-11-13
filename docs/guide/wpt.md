@@ -1,5 +1,7 @@
 # WPT 布局对比
 
+WPT 运行器仅用于源码开发环境；正式发行 JAR 不包含测试运行器和测试页面。`runWptClient` 使用项目的开发类路径。
+
 `wpt/` 把 Web Platform Tests 的 CSS 布局页面当基准：同一份 HTML 先在 Chromium 里采集元素几何快照，再让 KUI 客户端解析采集，两端按 DOM 顺序比 tag/id 和矩形（阈值 0.25 CSS 像素）。
 
 **`pass` 只代表"KUI 和浏览器的几何快照一致"**，不代表通过 WPT 规范测试——testharness 断言、reftest 参考页、JS 语义都不在执行范围内。

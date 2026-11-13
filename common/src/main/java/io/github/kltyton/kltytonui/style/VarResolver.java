@@ -1,7 +1,10 @@
 package io.github.kltyton.kltytonui.style;
 
 import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.Map;
 import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.parser.CSS;
 import io.github.kltyton.kltytonui.parser.CssString;
 
 /**
@@ -34,12 +37,35 @@ public final class VarResolver {
                 String resolved = resolveVarInValue(style, value, context, 0);
                 // An unresolved text color is invalid at computed-value time and inherits.
                 if (field.getName().equals("color") && resolved.contains("var(")) resolved = "unset";
+                if (resolved.startsWith(ShorthandParser.PENDING_BACKGROUND)) {
+                    String background = resolved.substring(ShorthandParser.PENDING_BACKGROUND.length(), resolved.length() - 1);
+                    Style probe = new Style();
+                    ShorthandParser.applyBackground(probe, background.contains("var(") ? "" : background);
+                    resolved = (String) field.get(probe);
+                } else if (resolved.startsWith(ShorthandParser.PENDING_TRANSITION)) {
+                    String transition = resolved.substring(ShorthandParser.PENDING_TRANSITION.length(), resolved.length() - 1);
+                    Style probe = new Style();
+                    ShorthandParser.applyTransition(probe, transition.contains("var(") ? "initial" : transition);
+                    resolved = (String) field.get(probe);
+                }
                 if (!resolved.equals(value)) {
                     field.set(style, resolved);
                 }
             } catch (IllegalAccessException ignored) {
             }
         }
+        Map<String, CSS.Declaration> pending = style.pendingShorthands;
+        style.pendingShorthands = null;
+        if (pending == null) return;
+        Map<CSS.Declaration, Map<String, String>> expansions = new HashMap<>();
+        pending.forEach((property, declaration) -> {
+            Map<String, String> longhands = expansions.computeIfAbsent(declaration, entry -> {
+                String value = resolveVarInValue(style, entry.value(), context, 0);
+                return "flex".equals(entry.pendingShorthand()) ? ShorthandParser.expandFlex(value)
+                        : ShorthandParser.expandGrid(entry.pendingShorthand(), value);
+            });
+            style.update(property, longhands.getOrDefault(property, "unset"));
+        });
     }
 
     /** 递归解析字符串中的所有 var() 引用。 */

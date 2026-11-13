@@ -12,8 +12,8 @@ import io.github.kltyton.kltytonui.dom.CommentNode;
 import io.github.kltyton.kltytonui.dom.DocumentFragment;
 import io.github.kltyton.kltytonui.dom.TextNode;
 import io.github.kltyton.kltytonui.script.host.KuiScriptHost;
-import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
-import dev.latvian.mods.rhino.util.HideFromJS;
+import io.github.kltyton.kltytonui.script.neon.NeonPageRuntime;
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 
 public abstract class Node implements KuiScriptHost {
 
@@ -28,19 +28,13 @@ public abstract class Node implements KuiScriptHost {
     public final ArrayList<Node> childNodes = new ArrayList<>();
     public int depth = 0;
     private long subtreeMutationVersion = 1L;
-    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
+
 
     private final EventRegistry events = new EventRegistry(this);
     public CopyOnWriteArrayList<Event.ListenerRecord> EventListener = events.listeners();
 
     protected Node(Document document) {
         this.document = document;
-    }
-
-    @Override
-    @HideFromJS
-    public final ScriptHostBindings getScriptBindings() {
-        return scriptBindings;
     }
 
     public Document getOwnerDocument() {
@@ -148,7 +142,10 @@ public abstract class Node implements KuiScriptHost {
     public Node removeChild(Node node) {
         if (document == null || node == null || node.parentNode != this) return null;
         if (isConnected()) document.removeNode(node);
-        else detachLocalChild(node);
+        else {
+            detachLocalChild(node);
+            NeonPageRuntime.treeChanged(node);
+        }
         return node;
     }
 
@@ -161,6 +158,7 @@ public abstract class Node implements KuiScriptHost {
         ArrayList<Node> snapshot = new ArrayList<>(childNodes);
         for (Node child : snapshot) {
             detachLocalChild(child);
+            NeonPageRuntime.treeChanged(child);
         }
     }
 
@@ -209,6 +207,7 @@ public abstract class Node implements KuiScriptHost {
             int index = childNodes.indexOf(oldNode);
             if (index < 0) return null;
             detachLocalChild(oldNode);
+            NeonPageRuntime.treeChanged(oldNode);
             attachLocalChild(inserted, index);
         }
         return oldNode;
@@ -238,10 +237,11 @@ public abstract class Node implements KuiScriptHost {
 
     private void attachLocalChild(Node node, int index) {
         if (node == null) return;
+        Document previousOwner = node.document;
         // 断开状态下插入也会改变单元的渲染子节点集合，选择缓存随之失效
         if (document != null) document.bumpSelectionCache();
         if (node.parentNode == this && childNodes.indexOf(node) < index) index--;
-        if (node.isConnected()) node.document.removeNode(node);
+        if (node.isConnected()) node.document.getTree().removeNode(node, false);
         else detachLocalChild(node);
         int safeIndex = Math.max(0, Math.min(index, childNodes.size()));
         childNodes.add(safeIndex, node);
@@ -259,6 +259,8 @@ public abstract class Node implements KuiScriptHost {
             childElement.parentElement = null;
             childElement.syncDomStateAfterAttach();
         }
+        if (previousOwner == node.document) NeonPageRuntime.treeChanged(node);
+        else NeonPageRuntime.treeChanged(node, previousOwner);
     }
 
     private static void updateLocalSubtree(Node node, Document document, int depth) {
@@ -350,17 +352,17 @@ public abstract class Node implements KuiScriptHost {
         return !targetEvent.defaultPrevented;
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<Event> listener) {
         events.addEventListener(type, listener);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<Event> listener, boolean useCapture) {
         events.addEventListener(type, listener, useCapture);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<Event> listener, boolean useCapture, boolean once) {
         events.addEventListener(type, listener, useCapture, once);
     }
@@ -381,12 +383,12 @@ public abstract class Node implements KuiScriptHost {
         events.addInternalEventListener(type, listener, useCapture);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void removeEventListener(String type, Consumer<Event> listener) {
         removeEventListener(type, listener, false);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void removeEventListener(String type, Consumer<Event> listener, boolean useCapture) {
         events.removeEventListener(type, listener, useCapture);
     }

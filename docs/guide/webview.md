@@ -59,8 +59,8 @@ KUI 本身不是浏览器——HTML 解析、CSS 布局、绘制都是自研引�
 
 - 内部页面的 **CSS 视口 = 元素的内容盒**（CSS px）：`innerWidth`、`vw/vh`、媒体查询都按内容盒算；
 - 栅格按内容盒的**设备像素**（内容盒 × 设备缩放）抓取，页面侧 `devicePixelRatio` 等于该缩放，所以默认是 1:1 实分辨率，非 100% 屏幕缩放下也不糊；
-- `auto` / `fast` 超过 120 万像素时按面积降采样；显式 `lossless` / `stream` 保留设备分辨率。所有模式仍服从 `capture-scale` 和单边 4096 px 上限。缩小时 WebView2 的 ZoomFactor（`zoom`，范围 0.25 ~ 5）会同步重算，页面 CSS 视口保持原尺寸；
-- 纹理始终按内容盒绘制，所以栅格变小不会让内容错位，只牺牲清晰度。
+- `auto` / `fast` 的面积上限取自真实窗口帧缓冲面积（读不到帧缓冲时回退 4096²），超过才按面积降采样；显式 `lossless` / `stream` 不按面积降采样，设备分辨率只受 `capture-scale` 和单边上限影响。所有模式的单边上限取窗口帧缓冲的较长边，最低 4096、最高 8192。缩小时 WebView2 的 ZoomFactor（`zoom`，范围 0.25 ~ 5）会同步重算，页面 CSS 视口保持原尺寸；
+- 纹理始终按内容盒绘制，绘制四边形还会吸附到设备像素网格，避免半像素采样让 1:1 画面整体发软；栅格变小不会让内容错位，只牺牲清晰度。
 
 ## 渲染管线
 
@@ -128,6 +128,48 @@ KuiServices.webView().unavailableReason();  // 不可用原因
 - ZoomFactor 被 WebView2 限死在 0.25 ~ 5，SDK 无法放宽；
 - **没有面向脚本的 webview API**：JS 侧只有通用 DOM 属性 / 事件（`getAttribute`/`setAttribute`）；Java 侧也没有 `reload()` / `navigate()` 这类方法，用改属性代替。
 
+## Java ↔ WebView2 JS 桥接
+
+```mermaid
+sequenceDiagram
+    participant Page as 已授权网页
+    participant Bridge as WebView 消息桥
+    participant Client as 客户端方法
+    Page->>Bridge: kui.call(method, params)
+    Bridge->>Client: 核对页面与会话后调用
+    Client-->>Bridge: CompletionStage JSON 结果
+    Bridge-->>Page: 当前导航会话的响应
+```
+
+Java 在客户端线程配置具体 iframe，handler 也在其 tick 线程调用，不能阻塞：
+
+```java
+iframe.bridge()
+    .allowPage("https://example.com/panel")
+    .register("player.getInfo", (context, params) -> {
+        JsonObject result = new JsonObject();
+        result.addProperty("health", 20); // 示例：实际从客户端游戏状态读取
+        return CompletableFuture.completedFuture(result);
+    });
+// 握手完成后主动推送；未就绪或队列满返回 false。
+iframe.bridge().emit("player.healthChanged", healthJson);
+```
+
+WebView2 页面（不是 KUI 自研 JS 环境）使用：
+
+```javascript
+await kui.ready();
+const player = await kui.call('player.getInfo', {});
+const off = kui.on('player.healthChanged', data => console.log(data));
+off(); // 取消订阅
+```
+
+- 使用 WebView2 `WebMessageReceived` / `PostWebMessageAsJson` 和有界 JNI 队列，不开启网络端口，不暴露 Java 反射或任意对象。
+- `allowPage` 是**精确页面 URL** 白名单，忽略 fragment，但区分路径和 query。只允许绝对 http/https/file URL，拒绝远程 file 主机。不要授权不受信任或可被外部用户修改的页面。
+- 每个顶层文档独立会话；导航清空旧消息并丢弃迟到响应；子 frame 不提供 convenience API。
+- 默认请求超时 10 秒，可用第三个参数指定 1–60000ms；超时不撤销已执行的 Java 副作用。异步 handler 返回 `CompletionStage<JsonElement>`。
+- 单条 JSON 最大 64 KiB，JS 最多 64 个未完成请求，原生入站/出站队列各最多 256 条，tick 每次最多取 32 条。handler 自身仍须快速返回。
+- 未注册方法返回 `METHOD_NOT_FOUND`；handler 异常返回 `JAVA_ERROR`，不把 Java 栈或异常内部细节传给网页。
 ## 调试
 
 `Iframe.status()` 是主要入口，三种形态：`unavailable: <原因>`、`no view` / `starting`、或完整一行。完整一行里的字段：
@@ -163,7 +205,7 @@ KuiServices.webView().unavailableReason();  // 不可用原因
 
 **滚轮把游戏快捷栏也切了**：宿主文档没有声明 `kui-mouse-events: intercept`，原生滚轮漏到了游戏。补上这个 meta（见 [KltytonScreen 的 meta 章节](kltytonui-screen#页面-meta-配置)）。
 
-**大 iframe 画面发软**：触发了单边 4096 上限或按面积降采样（`status()` 里会有 `raster capped by area`）。这是有意为之——保帧率、只牺牲清晰度，页面的 CSS 视口仍然精确。
+**大 iframe 画面发软**：默认 `auto` / `fast` 在元素超过窗口帧缓冲面积时会按面积降采样（`status()` 里会有 `raster capped by area`），或单边超过帧缓冲较长边（最低 4096、最高 8192）时被夹边；显式 `lossless` / `stream` 不按面积降采样，保留完整设备分辨率，但仍受 `capture-scale` 和单边上限约束。这是有意为之——保帧率、只牺牲清晰度，页面的 CSS 视口仍然精确。
 
 **视频播起来很卡**：抓帧有固定成本，重页面 PNG 会掉到个位数帧率。保持默认 `capture="auto"`（会自动切 JPEG），必要时再降 `capture-scale`；想钉死 JPEG 用 `capture="fast"`。
 

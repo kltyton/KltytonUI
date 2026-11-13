@@ -20,6 +20,7 @@ public final class ClientServicesBootstrap {
         KuiServices.setKeys(KeyService.INSTANCE);
         KuiServices.setRender(RenderService.INSTANCE);
         KuiServices.setItems(ItemRenderService.INSTANCE);
+        KuiServices.setModels(io.github.kltyton.kltytonui.client.model.ModelRenderService.INSTANCE);
         KuiServices.setAudio(io.github.kltyton.kltytonui.media.openal.OpenAlAudioService.create(
                 () -> net.minecraft.client.Minecraft.getInstance().options
                         .getSoundSourceVolume(net.minecraft.sounds.SoundSource.MASTER)));
@@ -32,7 +33,8 @@ public final class ClientServicesBootstrap {
     private static void onRegisterShaders(RegisterShadersEvent event) {
         try {
             ShaderRegistry.register(event);
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            throw new java.io.UncheckedIOException("Cannot load KltytonUI shaders", failure);
         }
     }
 }

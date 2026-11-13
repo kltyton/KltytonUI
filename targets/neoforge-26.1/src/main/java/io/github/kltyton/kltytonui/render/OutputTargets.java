@@ -27,6 +27,26 @@ public final class OutputTargets {
         current = target;
     }
 
+    /**
+     * RenderType.draw gives the PIP overrides priority over its OutputTarget.
+     * Redirect only buffer submission: keeping these overrides changed while
+     * preparing filters would also redirect reads of the main/PIP backdrop.
+     */
+    public static io.github.kltyton.kltytonui.spi.KuiRenderService.RenderStateScope pushBufferTarget(RenderTarget mainTarget) {
+        RenderTarget target = current;
+        if (target == null || target == mainTarget) {
+            return io.github.kltyton.kltytonui.spi.KuiRenderService.RenderStateScope.NOOP;
+        }
+        var color = com.mojang.blaze3d.systems.RenderSystem.outputColorTextureOverride;
+        var depth = com.mojang.blaze3d.systems.RenderSystem.outputDepthTextureOverride;
+        com.mojang.blaze3d.systems.RenderSystem.outputColorTextureOverride = target.getColorTextureView();
+        com.mojang.blaze3d.systems.RenderSystem.outputDepthTextureOverride = target.getDepthTextureView();
+        return () -> {
+            com.mojang.blaze3d.systems.RenderSystem.outputColorTextureOverride = color;
+            com.mojang.blaze3d.systems.RenderSystem.outputDepthTextureOverride = depth;
+        };
+    }
+
     public static RenderTarget rawCurrentTarget() {
         return current;
     }

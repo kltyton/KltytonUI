@@ -59,8 +59,8 @@ Implemented per the CSS 2.1 replaced-element rules, matching a browser:
 
 - the inner page's **CSS viewport equals the element's content box** in CSS pixels: `innerWidth`, `vw`/`vh` and media queries all resolve against it;
 - the raster is captured at the content box's **device pixels** (content box × device scale) and the page's `devicePixelRatio` equals that scale, so it is 1:1 at real resolution and stays crisp at any screen scaling;
-- `auto` / `fast` captures are downscaled by area past 1.2 million pixels; explicit `lossless` / `stream` captures preserve device resolution. All modes still obey `capture-scale` and the 4096 px per-axis cap. When the raster shrinks, WebView2's ZoomFactor (`zoom`, clamped to 0.25 – 5) is recomputed while the CSS viewport keeps its original size;
-- the texture is always painted to the content box, so a smaller raster never misplaces the content — it only softens it.
+- `auto` / `fast` take their area ceiling from the real window framebuffer area (falling back to 4096² when the framebuffer cannot be read), and only downscale past it; explicit `lossless` / `stream` never downscale by area, and their device resolution is limited only by `capture-scale` and the per-axis ceiling. For all modes that ceiling comes from the longer framebuffer edge, floored at 4096 and capped at 8192. When the raster shrinks, WebView2's ZoomFactor (`zoom`, clamped to 0.25 – 5) is recomputed while the CSS viewport keeps its original size;
+- the texture is always painted to the content box, and the painted quad is snapped to the device pixel grid so half-pixel sampling cannot soften a 1:1 image; a smaller raster never misplaces the content — it only softens it.
 
 ## Rendering pipeline
 
@@ -128,6 +128,34 @@ KuiServices.webView().unavailableReason();  // why it is unavailable
 - ZoomFactor is clamped by WebView2 to 0.25 – 5 and the SDK cannot widen it;
 - **there is no scripting-facing webview API**: on the JS side only the generic DOM attributes / events are available (`getAttribute`/`setAttribute`); on the Java side there is no `reload()` / `navigate()` either — change the attribute instead.
 
+## Java ↔ WebView2 JS bridge
+
+```mermaid
+sequenceDiagram
+    participant Page as Authorized page
+    participant Bridge as WebView bridge
+    participant Client as Client handler
+    Page->>Bridge: kui.call(method, params)
+    Bridge->>Client: Verify page and session, invoke handler
+    Client-->>Bridge: CompletionStage JSON result
+    Bridge-->>Page: Response for current navigation session
+```
+
+Configure `iframe.bridge().allowPage(absoluteUrl).register(method, handler)` on the client thread. Handlers receive `(Context, JsonElement)` and return `CompletionStage<JsonElement>`; invocation happens during the iframe client tick and must not block. `Context` contains the verified source URI and document session. Existing Gson types are used; no Java object or reflection access is exposed.
+
+Inside the actual WebView2 page:
+
+```javascript
+await kui.ready();
+const result = await kui.call('player.getInfo', {});
+const unsubscribe = kui.on('player.healthChanged', data => console.log(data));
+unsubscribe();
+```
+
+Java publishes events with `iframe.bridge().emit(name, json)`, which returns false before handshake or under backpressure. `allowPage` authorizes exact absolute http/https/file page URLs (fragment ignored, path/query checked); remote file hosts are rejected. Do not authorize untrusted content. Navigation invalidates sessions and late responses. The convenience API is only installed in the top-level document.
+
+The transport uses WebView2 web messages and bounded JNI queues, independently of pixel streaming. Messages are limited to 64 KiB, JS to 64 concurrent calls, and native incoming/outgoing queues to 256 entries. Each tick drains at most 32 incoming messages. Requests time out after 10 seconds by default; the third `call` argument accepts 1–60000ms. Timeout does not undo Java side effects. Unknown methods return `METHOD_NOT_FOUND`; handler failures return a sanitized `JAVA_ERROR`.
+
 ## Debugging
 
 `Iframe.status()` is the main entry point and reads in three shapes: `unavailable: <reason>`, `no view` / `starting`, or one full line. The fields in the full line:
@@ -163,7 +191,7 @@ KuiServices.webView().unavailableReason();  // why it is unavailable
 
 **The wheel also switched the game hotbar**: the host document does not declare `kui-mouse-events: intercept`, so the native wheel leaked through to the game. Add that meta (see the [KltytonScreen meta section](kltytonui-screen#page-meta-configuration)).
 
-**A large iframe looks soft**: the 4096 px per-axis cap or by-area downscaling kicked in (`raster capped by area` in `status()`). That is intentional — it protects the frame rate and trades only sharpness; the page's CSS viewport stays exact.
+**A large iframe looks soft**: with the default `auto` / `fast`, an element larger than the window framebuffer area is downscaled by area (`raster capped by area` in `status()`), or a per-axis size beyond the longer framebuffer edge is clamped (floored at 4096, capped at 8192); explicit `lossless` / `stream` never downscale by area and preserve full device resolution, while still obeying `capture-scale` and the per-axis ceiling. That is intentional — it protects the frame rate and trades only sharpness; the page's CSS viewport stays exact.
 
 **Video stutters**: captures cost a fixed amount, and a heavy page on PNG drops to single-digit frame rates. Keep the default `capture="auto"` (it switches to JPEG), lower `capture-scale` if needed, or pin JPEG with `capture="fast"`.
 

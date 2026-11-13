@@ -2,6 +2,7 @@ package io.github.kltyton.kltytonui.behavior;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.kltyton.kltytonui.element.AbstractText;
+import io.github.kltyton.kltytonui.element.Iframe;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Flex;
 import io.github.kltyton.kltytonui.layout.Layout;
@@ -64,6 +65,7 @@ public final class TextSelection {
 
     /** Cancellable mousedown default action, applied after DOM listeners have run. */
     public void handleMouseDownDefault(MouseEvent event) {
+        if (owner instanceof Iframe) return;
         if (isInsideRichTextEditor(owner)) return;
         Document document = owner.document;
         if (document == null) return;
@@ -244,7 +246,7 @@ public final class TextSelection {
                 && rawEvent.target instanceof AbstractText input && input.canEditText()) {
             String draggedText = document.getDraggedText();
             if (draggedText != null && !draggedText.isEmpty()) {
-                input.insertText(draggedText);
+                input.insertText(draggedText, "insertFromDrop");
             }
         }
         document.endTextDrag();
@@ -271,11 +273,8 @@ public final class TextSelection {
     private static int locateOffsetInUnit(Element unit, double x, double y) {
         if (unit == null) return 0;
         String display = unit.getComputedStyle().display;
-        if (Layout.isFlexDisplay(display)) {
-            return locateFlexDirect(unit, x, y);
-        }
-        if (Layout.isGridDisplay(display)) {
-            return locateLeaf(unit, x, y);
+        if (Layout.isFlexDisplay(display) || Layout.isGridDisplay(display)) {
+            return locateDirectLayoutText(unit, x, y);
         }
         if (SelectionUnits.paintsTextViaRuns(unit)) {
             return locateRuns(unit, x, y);
@@ -402,8 +401,8 @@ public final class TextSelection {
         }
     }
 
-    /** flex 直接文本布局的命中：按布局位置找最近的文本块，再按字符宽度定位。 */    private static int locateFlexDirect(Element unit, double x, double y) {
-        List<Flex.DirectTextLayout> layouts = Flex.computeDirectTextLayouts(unit);
+    /** flex 直接文本布局的命中：按布局位置找最近的文本块，再按字符宽度定位。 */    private static int locateDirectLayoutText(Element unit, double x, double y) {
+        List<Layout.DirectTextLayout> layouts = Layout.computeDirectTextLayouts(unit);
         if (layouts.isEmpty()) return 0;
         List<String> fragments = SelectionUnits.flexTextFragments(unit);
         String flattened = SelectionUnits.flattenedSelectableText(unit);
@@ -416,7 +415,7 @@ public final class TextSelection {
         double bestDistance = Double.MAX_VALUE;
         int fragmentIndex = 0;
         int accumulatedBase = 0;
-        for (Flex.DirectTextLayout layout : layouts) {
+        for (Layout.DirectTextLayout layout : layouts) {
             Text text = layout.text();
             if (text == null || text.content == null || text.content.isEmpty()) continue;
             int base = accumulatedBase;
@@ -470,18 +469,17 @@ public final class TextSelection {
     public static boolean isPositionOverSelectableText(Element unit, double x, double y) {
         if (unit == null) return false;
         String display = unit.getComputedStyle().display;
-        if (Layout.isFlexDisplay(display)) return overFlexDirectText(unit, x, y);
-        if (Layout.isGridDisplay(display)) return overLeafText(unit, x, y);
+        if (Layout.isFlexDisplay(display) || Layout.isGridDisplay(display)) return overDirectLayoutText(unit, x, y);
         if (SelectionUnits.paintsTextViaRuns(unit)) return overRunsText(unit, x, y);
         return overLeafText(unit, x, y);
     }
 
-    private static boolean overFlexDirectText(Element unit, double x, double y) {
+    private static boolean overDirectLayoutText(Element unit, double x, double y) {
         Position origin = Position.forRender(unit);
         Box box = Box.of(unit);
         double ox = origin.x + box.getMarginLeft();
         double oy = origin.y + box.getMarginTop();
-        for (Flex.DirectTextLayout layout : Flex.computeDirectTextLayouts(unit)) {
+        for (Layout.DirectTextLayout layout : Layout.computeDirectTextLayouts(unit)) {
             if (layout == null || layout.text() == null || layout.position() == null) continue;
             Text text = layout.text();
             if (text.content == null || text.content.isEmpty()) continue;
@@ -842,7 +840,7 @@ public final class TextSelection {
         Text base = Text.of(owner);
         int stamp = base.styleStamp();
         if (cachedSelectableText != null && cachedSelectableBase == base && cachedSelectableStamp == stamp) {
-            cachedSelectableText.content = SelectionUnits.ownSelectableText(owner);
+            cachedSelectableText.content = io.github.kltyton.kltytonui.dom.TextTransform.apply(SelectionUnits.ownSelectableText(owner), owner);
             return cachedSelectableText;
         }
         Text copy = new Text();
@@ -860,6 +858,7 @@ public final class TextSelection {
         copy.verticalAlign = base.verticalAlign;
         copy.whiteSpace = base.whiteSpace;
         copy.wordBreak = base.wordBreak;
+        copy.hyphenBreak = base.hyphenBreak;
         copy.textIndent = base.textIndent;
         copy.letterSpacing = base.letterSpacing;
         copy.rasterBackgroundColor = base.rasterBackgroundColor;
@@ -868,7 +867,7 @@ public final class TextSelection {
         // painted by the descendants themselves (or by normal-flow runs).
         // Flattening the whole subtree here makes a block container paint all
         // of its child labels again at the container's content origin.
-        copy.content = SelectionUnits.ownSelectableText(owner);
+        copy.content = io.github.kltyton.kltytonui.dom.TextTransform.apply(SelectionUnits.ownSelectableText(owner), owner);
         cachedSelectableText = copy;
         cachedSelectableBase = base;
         cachedSelectableStamp = stamp;
@@ -892,11 +891,12 @@ public final class TextSelection {
         copy.verticalAlign = base.verticalAlign;
         copy.whiteSpace = base.whiteSpace;
         copy.wordBreak = base.wordBreak;
+        copy.hyphenBreak = base.hyphenBreak;
         copy.textIndent = base.textIndent;
         copy.letterSpacing = base.letterSpacing;
         copy.rasterBackgroundColor = base.rasterBackgroundColor;
         copy.retainOwnerFrom(base);
-        copy.content = SelectionUnits.flattenedSelectableText(unit);
+        copy.content = io.github.kltyton.kltytonui.dom.TextTransform.apply(SelectionUnits.flattenedSelectableText(unit), unit);
         return copy;
     }
 

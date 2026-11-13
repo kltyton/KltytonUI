@@ -13,3 +13,11 @@ accessible field net/minecraft/world/inventory/Slot y I
 mutable field net/minecraft/world/inventory/Slot y I
 
 accessible field net/minecraft/client/renderer/RenderType sortOnUpload Z
+
+# RecipeExpander previews need template/base/addition; vanilla smithing recipes expose no public ingredient getters.
+accessible field net/minecraft/world/item/crafting/SmithingTransformRecipe template Lnet/minecraft/world/item/crafting/Ingredient;
+accessible field net/minecraft/world/item/crafting/SmithingTransformRecipe base Lnet/minecraft/world/item/crafting/Ingredient;
+accessible field net/minecraft/world/item/crafting/SmithingTransformRecipe addition Lnet/minecraft/world/item/crafting/Ingredient;
+accessible field net/minecraft/world/item/crafting/SmithingTrimRecipe template Lnet/minecraft/world/item/crafting/Ingredient;
+accessible field net/minecraft/world/item/crafting/SmithingTrimRecipe base Lnet/minecraft/world/item/crafting/Ingredient;
+accessible field net/minecraft/world/item/crafting/SmithingTrimRecipe addition Lnet/minecraft/world/item/crafting/Ingredient;

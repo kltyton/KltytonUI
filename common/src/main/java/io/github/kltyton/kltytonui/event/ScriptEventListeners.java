@@ -29,7 +29,8 @@ public final class ScriptEventListeners {
         boolean capture = option(options, "capture", options instanceof Boolean value && value);
         boolean once = option(options, "once", false);
         boolean passive = option(options, "passive", false);
-        List<Registration> callbackRegistrations = registrations.computeIfAbsent(callback,
+        Object callbackIdentity = KuiServices.script().callbackIdentity(callback);
+        List<Registration> callbackRegistrations = registrations.computeIfAbsent(callbackIdentity,
                 ignored -> new ArrayList<>());
         for (Registration registration : callbackRegistrations) {
             if (registration.type.equals(type) && registration.capture == capture) return;
@@ -56,7 +57,8 @@ public final class ScriptEventListeners {
     public synchronized void remove(String type, Object callback, Object options) {
         if (type == null || callback == null) return;
         boolean capture = option(options, "capture", options instanceof Boolean value && value);
-        List<Registration> callbackRegistrations = registrations.get(callback);
+        Object callbackIdentity = KuiServices.script().callbackIdentity(callback);
+        List<Registration> callbackRegistrations = registrations.get(callbackIdentity);
         if (callbackRegistrations == null) return;
         for (Registration registration : List.copyOf(callbackRegistrations)) {
             if (!registration.type.equals(type) || registration.capture != capture) continue;
@@ -76,10 +78,11 @@ public final class ScriptEventListeners {
     }
 
     private synchronized void forget(Registration registration) {
-        List<Registration> callbackRegistrations = registrations.get(registration.callback);
+        Object callbackIdentity = KuiServices.script().callbackIdentity(registration.callback);
+        List<Registration> callbackRegistrations = registrations.get(callbackIdentity);
         if (callbackRegistrations == null) return;
         callbackRegistrations.remove(registration);
-        if (callbackRegistrations.isEmpty()) registrations.remove(registration.callback);
+        if (callbackRegistrations.isEmpty()) registrations.remove(callbackIdentity);
     }
 
     private static boolean option(Object options, String name, boolean fallback) {

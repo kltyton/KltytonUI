@@ -67,9 +67,13 @@ public class Box {
     }
 
     public void applyBorder(String side, String value) {
-        String currentColor = element == null ? null : element.getComputedStyle().color;
+        int currentColor = currentColorOf(element == null ? null : element.getComputedStyle());
         SideBorder sideBorder = parseSideBorder(value, currentColor);
         setBorder(side, sideBorder);
+    }
+
+    private static int currentColorOf(Style style) {
+        return Color.resolveCurrentColor(style == null ? null : style.color, Color.DEFAULT_CURRENT_COLOR);
     }
 
     public void applyBorderAll(String value) {
@@ -515,17 +519,15 @@ public class Box {
 
 
     public static SideBorder parseSideBorder(String string) {
-        return parseSideBorder(string, null);
+        return parseSideBorder(string, Color.DEFAULT_CURRENT_COLOR);
     }
 
-    private static SideBorder parseSideBorder(String string, String currentColor) {
+    public static SideBorder parseSideBorder(String string, int currentColor) {
         String[] res = splitWhitespace(string, 3);
         if (res.length != 3) return SideBorder.getDefault();
         Double width = Size.parseNumber(res[0]);
         if (width == null) return SideBorder.getDefault();
-        String color = currentColor != null && "currentcolor".equalsIgnoreCase(res[2])
-                ? currentColor : res[2];
-        return new SideBorder(Math.max(0, width), res[1], new Color(color));
+        return new SideBorder(Math.max(0, width), res[1], new Color(Color.parse(res[2], currentColor)));
     }
 
     private static Outline parseOutline(Style style, Element element) {
@@ -683,7 +685,7 @@ public class Box {
         if (valid(style.borderImageRepeat)) bi.repeat = style.borderImageRepeat;
 
         if (style.borderImage.startsWith("linear-gradient")) {
-            bi.gradient = Gradient.parse(style.borderImage);
+            bi.gradient = Gradient.parse(style.borderImage, currentColorOf(style));
         }
 
         return bi.isEmpty() ? null : bi;

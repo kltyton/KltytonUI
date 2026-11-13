@@ -16,7 +16,7 @@ Community:
 
 KltytonUI was built around one goal: a UI framework that is low-friction, convenient, and broadly capable. That is why it takes the classic HTML + CSS + JS trio as its core.
 
-Page scripts use the standalone Rhino runtime on all supported targets. KubeJS is optional and provides mod bindings on Forge 1.20.1 and NeoForge 1.21.1. Install the matching Rhino dependency for the target.
+KUI runs page scripts with its embedded NeonJS 0.1.4 runtime. Each document has its own JavaScript realm.
 
 How low? You can have AI generate everything KltytonUI-related for you. Web frameworks are popular enough that AI knows them well — the result may even look better than what you would draw yourself, and you can still read it.
 
@@ -36,9 +36,19 @@ Note: KltytonUI does not bundle a Chrome runtime. It is built entirely from scra
 
 ### Showcase
 
+#### Model previews
+
+Use `<model>` to display a separate player or entity preview. Drag with the left mouse button to rotate it. Preview entities do not enter the game world, and removing the element releases its preview state.
+
+```html
+<model type="bakedmodel" yaw="25" pitch="-10">minecraft:zombie</model>
+```
+
+For `type="player"`, the content is a player UUID. For `type="bakedmodel"`, it is a living entity registry ID; `type="gecko"` uses an installed GeckoLib entity registry ID. KUI does not bundle GeckoLib. The `yaw`, `pitch`, and `roll` attributes use degrees. Set `flat="true"` for flattened depth ordering. The default size is 128×128 and can be changed with CSS.
+
 #### Built-in pure-CSS themes
 
-The Ore and AE themes are built in, and more MC-flavored (or deliberately un-MC) general-purpose themes will follow. They all share the same CSS naming scheme, so switching between them is seamless.
+Version 1.2.8 adds fourteen switchable themes: Ore, Claude Square/Round, CurseForge, Modrinth Light/Dark, Arwes/Arwes Transparent, Neobrutalist, Hand-Drawn Doodle, Retro Vintage, Vaporwave, Impressionist Oil, and Mecha. The shared preview example remains in the source repository; add `<theme-switcher></theme-switcher>` to a page to switch themes. The bubbling `kui-theme-change` event carries the selected theme ID in detail. Existing Ore, AE, and McUI stylesheet paths remain available.
 
 - [Limitless Vehicle](https://www.curseforge.com/minecraft/mc-mods/limitless-vehicle) 3D printer
 ![Limitless Vehicle 3D printer](https://resource-api.xyeidc.com//client/members/pics/ff19472f)
@@ -48,7 +58,7 @@ The Ore and AE themes are built in, and more MC-flavored (or deliberately un-MC)
 
 #### Draw whenever you like
 
-It integrates fully with Minecraft's rendering — draw wherever you want. KubeJS alone is enough to customize item tooltips and radial menus.
+It integrates fully with Minecraft's rendering — draw wherever you want.
 
 - [东方足道屿](https://www.bilibili.com/video/BV1yzGJ6hEcp/) item tooltip
 ![东方足道屿 item tooltip](https://resource-api.xyeidc.com//client/members/pics/401af7c1)
@@ -98,7 +108,7 @@ So that different mods' UIs can stay independent while still interacting with ea
 
 Put simply, creating a document with an `iframe` tag actually opens a WebView and draws it off-screen into the iframe's area.
 
-WebView's drawbacks are obvious: from either Java or KubeJS it is hard to find an elegant way to interact with it logically, so KltytonUI currently only forwards hardware input to it.
+WebView pages and the KUI DOM remain isolated. KltytonUI forwards mouse, keyboard and scroll input; Java can also exchange messages with explicitly authorized pages through the [WebView message bridge](guide/webview.md).
 
 Its high memory use also makes WebView a poor fit for overlays and world windows.
 
@@ -112,10 +122,10 @@ The upside is that WebView partly compensates for KltytonUI's incomplete coverag
 
 The mod JAR includes the English development documentation.
 
-Using KltytonUI does not require knowledge of its internals. Maven Central publication is being prepared; use this configuration after the selected version is public. See [Maven publishing](guide/maven-publishing) for maintainer commands.
+Use the Sighs Maven repository with the dependency for your loader and Minecraft version.
 ```Groovy
 repositories {
-    mavenCentral()
+    maven { url = uri("https://maven.sighs.cc/repository/maven-public/") }
 }
 dependencies {
     implementation 'io.github.kltyton.kltytonui:KltytonUI-forge-1.20.1:<published-version>'
@@ -182,8 +192,7 @@ KltytonUI also offers a retro "server sends HTML to the client to render" workfl
 ### Want to know more?
 
 - KltytonUI also implements browser-style zoom: hold CTRL and scroll on a page to zoom in and out, so players can adapt to any window size.
-- KubeJS is an optional dependency. Without it you cannot run the JavaScript written inside HTML, and the console is unavailable — but for mod developers that rarely matters, since DOM work can be done in Java.
-- Hot reload is fast: twenty different QQ avatars plus three custom fonts, including inline JS, reload a whole document in about one second. If you write KubeJS client scripts you might even use it to cut corners — though the resource paths offer no PJS completion. Note that this reload does not reload resource packs.
+- Hot reload is fast: twenty different QQ avatars plus three custom fonts, including inline JS, reload a whole document in about one second. Note that this reload does not reload resource packs.
 - KltytonUI has no obvious performance bottleneck in normal use, and on 26.1 and above there is almost nothing to worry about. But the author cannot test every case — if you happen to hit a sudden stutter, please report it immediately.
 - Lightweight ports of modern front-end frameworks such as Vue and Svelte are in active development. A simple Vue already has a PR from kltyton, and Svelte will be built in later. Join the group if you are interested!
 

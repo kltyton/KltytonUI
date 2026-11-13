@@ -12,14 +12,10 @@ import io.github.kltyton.kltytonui.loader.Loader;
 import io.github.kltyton.kltytonui.resource.async.network.NetworkAsyncHandler;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Size;
-import io.github.kltyton.kltytonui.script.ecmascript.EcmaProxyObject;
-import io.github.kltyton.kltytonui.script.ecmascript.EcmaEventListener;
 import io.github.kltyton.kltytonui.spi.KuiServices;
 import io.github.kltyton.kltytonui.task.ClientScheduler;
 import io.github.kltyton.kltytonui.util.KuiLog;
-import dev.latvian.mods.rhino.Scriptable;
-import dev.latvian.mods.rhino.Callable;
-import dev.latvian.mods.rhino.util.HideFromJS;
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import io.github.kltyton.kltytonui.render.CommittedGeometry;
 import io.github.kltyton.kltytonui.render.RenderNode;
 import io.github.kltyton.kltytonui.style.Interaction;
@@ -56,7 +52,7 @@ import io.github.kltyton.kltytonui.util.Storage;
 import io.github.kltyton.kltytonui.event.Event;
 import io.github.kltyton.kltytonui.event.ScriptEventListeners;
 import io.github.kltyton.kltytonui.style.Style;
-import io.github.kltyton.kltytonui.script.host.ScriptHostBindings;
+import io.github.kltyton.kltytonui.script.neon.host.NeonScriptValue;
 
 public class Window implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
     public static final Window window = new Window();
@@ -80,7 +76,7 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
     private volatile long animationTimeMillis = (long) performance.now();
     private volatile boolean animationTimelinePaused;
     private final Console console = new Console();
-    private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
+
     private final CopyOnWriteArrayList<IntersectionObserver> intersectionObservers = new CopyOnWriteArrayList<>();
     private final ConcurrentLinkedQueue<IntersectionDelivery> pendingIntersectionDeliveries = new ConcurrentLinkedQueue<>();
     private final CopyOnWriteArrayList<ResizeObserver> resizeObservers = new CopyOnWriteArrayList<>();
@@ -121,12 +117,6 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         if (scriptTaskDepth.get() == 0) scheduleMicrotaskDrain();
     }
 
-    @Override
-    @dev.latvian.mods.rhino.util.HideFromJS
-    public final ScriptHostBindings getScriptBindings() {
-        return scriptBindings;
-    }
-
     public void beginScriptTask() {
         scriptTaskDepth.set(scriptTaskDepth.get() + 1);
     }
@@ -141,13 +131,6 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         drainMicrotasks();
     }
 
-    public EcmaProxyObject createProxy(Scriptable target, Scriptable handler) {
-        if (target == null || handler == null) {
-            throw new IllegalArgumentException("Proxy target and handler must be JavaScript objects");
-        }
-        return new EcmaProxyObject(target, handler);
-    }
-
     public Consumer<Event> createEventListener(Object callback) {
         Consumer<Event> listener = KuiServices.script().createEventListener(callback);
         if (listener != null) return listener;
@@ -157,10 +140,7 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
     public Consumer<Object> createCallback(Object callback) {
         Consumer<Object> listener = KuiServices.script().createCallback(callback);
         if (listener != null) return listener;
-        if (!(callback instanceof Callable callable) || !(callback instanceof Scriptable scriptable)) {
-            throw new IllegalArgumentException("Callback must be a JavaScript function");
-        }
-        return new EcmaEventListener(callable, scriptable);
+        throw new IllegalArgumentException("Callback must be a JavaScript function");
     }
 
     public Object wrapScriptHost(Object value) {
@@ -254,10 +234,20 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         return Size.getWindowSize().height();
     }
 
+    /**
+     * Device pixels per document CSS pixel: the same factor the canvas rasters and the
+     * iframe captures are sized with. Earlier this returned the Minecraft GUI scale, which is
+     * a different number whenever the display scaling differs from the GUI scale, so the
+     * standard {@code canvas.width = rect.width * devicePixelRatio} recipe produced a
+     * mismatched backing store.
+     */
     public double getDevicePixelRatio() {
-        net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
-        if (minecraft == null || minecraft.getWindow() == null) return 1.0;
-        return minecraft.getWindow().getGuiScale();
+        Document context = Document.getContextDocument();
+        if (context != null && context.isActive() && context.getViewport() != null) {
+            double scale = context.getViewport().scissorScale();
+            if (scale > 0.0d && Double.isFinite(scale)) return scale;
+        }
+        return 1.0d;
     }
 
     public Performance getPerformance() {
@@ -301,17 +291,17 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         return new BrowserLocation("");
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<? super Event> listener) {
         addEventListener(type, listener, false);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<? super Event> listener, boolean useCapture) {
         addEventListener(type, listener, useCapture, false);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void addEventListener(String type, Consumer<? super Event> listener, boolean useCapture, boolean once) {
         if (type == null || listener == null) return;
         Consumer<Event> wrapped = wrapWindowListener(listener);
@@ -327,12 +317,12 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         scriptListeners.add(type, callback, options);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void removeEventListener(String type, Consumer<? super Event> listener) {
         removeEventListener(type, listener, false);
     }
 
-    @HideFromJS
+    @HideFromScript
     public void removeEventListener(String type, Consumer<? super Event> listener, boolean useCapture) {
         if (type == null || listener == null) return;
         CopyOnWriteArrayList<Event.ListenerRecord> typeListeners = listeners.get(type);
@@ -353,7 +343,7 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         return true;
     }
 
-    @HideFromJS
+    @HideFromScript
     public void clearDocumentListeners(Document document) {
         scriptListeners.clear(document);
         for (CopyOnWriteArrayList<Event.ListenerRecord> typeListeners : listeners.values()) {
@@ -448,12 +438,12 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         return animationTimeMillis;
     }
 
-    @HideFromJS
+    @HideFromScript
     public void setAnimationTimeMillisForTesting(long timeMillis) {
         animationTimeMillis = timeMillis;
     }
 
-    @HideFromJS
+    @HideFromScript
     public void setAnimationTimelinePausedForTesting(boolean paused) {
         animationTimelinePaused = paused;
     }
@@ -554,6 +544,16 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
         for (IntersectionObserver observer : intersectionObservers) {
             if (observer != null && observer.owns(document)) {
                 observer.disposeForDocument();
+            }
+        }
+    }
+
+    @HideFromScript
+    public void clearResizeObservers(Document document) {
+        if (document == null) return;
+        for (ResizeObserver observer : resizeObservers) {
+            if (observer != null && observer.owns(document)) {
+                observer.disconnect();
             }
         }
     }
@@ -1004,26 +1004,23 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
 
     public static class Console implements io.github.kltyton.kltytonui.script.host.KuiScriptHost {
         private final Map<String, Long> timers = new ConcurrentHashMap<>();
-        private final transient ScriptHostBindings scriptBindings = new ScriptHostBindings();
-
-        @Override
-        @dev.latvian.mods.rhino.util.HideFromJS
-        public final ScriptHostBindings getScriptBindings() {
-            return scriptBindings;
-        }
 
         public void log(Object value) {
-            KltytonUI.LOGGER.info(String.valueOf(value));
+            KltytonUI.LOGGER.info("{}", formatMessage(value));
         }
 
         public Object debug;
 
         public void warn(Object value) {
-            KltytonUI.LOGGER.warn(String.valueOf(value));
+            KltytonUI.LOGGER.warn("{}", formatMessage(value));
         }
 
         public void error(Object value) {
-            KltytonUI.LOGGER.error(String.valueOf(value));
+            KltytonUI.LOGGER.error("{}", formatMessage(value));
+        }
+
+        private static String formatMessage(Object value) {
+            return value instanceof NeonScriptValue guest ? guest.toDisplayString() : String.valueOf(value);
         }
 
         public void time(String label) {
@@ -1972,12 +1969,16 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
     public static class ResizeObserver {
         private final Consumer<Object> callback;
         private final Window owner;
+        private final Document document;
+        private final long documentGeneration;
         private final Map<Element, SizeSnapshot> observed = new ConcurrentHashMap<>();
         private volatile boolean disconnected = false;
 
         public ResizeObserver(Consumer<Object> callback, Window owner) {
             this.callback = callback;
             this.owner = owner;
+            this.document = Document.getContextDocument();
+            this.documentGeneration = document == null ? -1L : document.getRefreshGeneration();
         }
 
         public void observe(Element element) {
@@ -1996,8 +1997,16 @@ public class Window implements io.github.kltyton.kltytonui.script.host.KuiScript
             owner.resizeObservers.remove(this);
         }
 
+        private boolean owns(Document candidate) {
+            return document == candidate;
+        }
+
         private void tick() {
             if (disconnected || callback == null || observed.isEmpty()) return;
+            if (document != null && !document.isCurrentGeneration(documentGeneration)) {
+                disconnect();
+                return;
+            }
             ArrayList<ResizeObserverEntry> entries = new ArrayList<>();
             for (Map.Entry<Element, SizeSnapshot> entry : observed.entrySet()) {
                 Element element = entry.getKey();

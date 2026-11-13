@@ -2,7 +2,6 @@
 
 Overlay 是不依附于任何 Minecraft Screen 的 Document：`KltytonUI.createDocument(path)` 创建后加入全局列表，由客户端在 GUI/HUD 绘制阶段自动渲染。适合做 HUD、Toast、提示条、浮动面板、全屏遮罩、开发工具。不打开新 Screen，也没有容器槽位——要槽位请走[容器文档](container)。
 
-本文的 KubeJS 示例适用于 Forge 1.20.1 和 NeoForge 1.21.1；Java API 可用于其他 target。详见[总览](overview#loader-与脚本支持)。
 
 ## 和 KltytonScreen 的区别
 
@@ -51,7 +50,7 @@ public static void close() {
 }
 ```
 
-创建和修改必须在客户端线程；网络回调里先 `Minecraft.getInstance().execute(...)`。KubeJS 客户端脚本里是同一组 API（`KltytonUI.createDocument(...)`），页面自己的脚本则直接用页面内的 `document`。
+创建和修改必须在客户端线程；网络回调里先 `Minecraft.getInstance().execute(...)`。页面脚本可直接使用 `document`。
 
 ## API
 
@@ -88,7 +87,7 @@ overlay.setReloadPersistent(true);   // Toast、全局通知这类要一直显�
 - **创建即解析**：`createDocument` 立即解析 HTML/CSS/JS、算布局、跑脚本、派发 DOMContentLoaded/load。开销不小，打开时建一次，别每帧建。
 - **修改**：改 DOM 后框架走增量更新。批量修改尽量一次做完，别拆成很多帧。
 - **移除**：`document.remove()` 清理焦点、hover、Observer 等状态。和 Screen 不同，它**不会**向 body 派发 unload——有清理逻辑就自己显式调。
-- **重载**：「重载资源」操作会 refresh 所有普通 Overlay，DOM 和 JS 状态重建，旧 Element 引用失效。该操作默认未绑定，需在 MC 控制设置中绑定。要保留的状态放 Java/KubeJS 侧，`load` 里写回。
+- **重载**：「重载资源」操作会 refresh 所有普通 Overlay，DOM 和 JS 状态重建，旧 Element 引用失效。该操作默认未绑定，需在 MC 控制设置中绑定。要保留的状态放 Java 侧，`load` 里写回。
 
 ## 层级：Document 之间和之内
 

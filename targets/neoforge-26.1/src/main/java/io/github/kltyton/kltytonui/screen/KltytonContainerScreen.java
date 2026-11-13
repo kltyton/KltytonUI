@@ -38,13 +38,13 @@ import java.util.Set;
  * {@code AbstractContainerScreenMixin}; menu slot items, display slot items
  * and tooltips are all extracted here.</p>
  */
-public class KltytonContainerScreen extends AbstractContainerScreen<KltytonContainerMenu> implements KuiLinkedScreen {
+public class KltytonContainerScreen<M extends net.minecraft.world.inventory.AbstractContainerMenu> extends AbstractContainerScreen<M> implements KuiLinkedScreen {
     private Document linkedDocument;
     private SlotDataBinder slotBinder;
     private KltytonUiPipRenderState.FloatingItemBatch floatingItems =
             new KltytonUiPipRenderState.FloatingItemBatch();
 
-    public KltytonContainerScreen(KltytonContainerMenu menu, Inventory inventory, Component title) {
+    public KltytonContainerScreen(M menu, Inventory inventory, Component title) {
         super(menu, inventory, title,
                 Math.max(1, Minecraft.getInstance().getWindow().getGuiScaledWidth()),
                 Math.max(1, Minecraft.getInstance().getWindow().getGuiScaledHeight()));
@@ -52,6 +52,10 @@ public class KltytonContainerScreen extends AbstractContainerScreen<KltytonConta
 
     public Document getLinkedDocument() {
         return linkedDocument;
+    }
+
+    public boolean usesKltytonMenu() {
+        return menu instanceof KltytonContainerMenu;
     }
 
     @SuppressWarnings("removal")
@@ -111,22 +115,30 @@ public class KltytonContainerScreen extends AbstractContainerScreen<KltytonConta
     protected void init() {
         super.init();
 
-        if (linkedDocument != null) {
-            linkedDocument.remove();
-            linkedDocument = null;
+        if (!(menu instanceof KltytonContainerMenu kuiMenu)) {
+            if (slotBinder != null) {
+                slotBinder.clear();
+                slotBinder = null;
+            }
+            return;
         }
-        if (slotBinder != null) {
-            slotBinder.clear();
-            slotBinder = null;
+        if (linkedDocument == null || linkedDocument.isDisposed()) {
+            if (linkedDocument != null) io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
+            if (slotBinder != null) {
+                slotBinder.clear();
+                slotBinder = null;
+            }
+            linkedDocument = Document.createForScreen(kuiMenu.getTemplatePath());
+            if (linkedDocument == null) return;
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.attach(linkedDocument);
         }
-
-        linkedDocument = Document.create(menu.getTemplatePath());
-        if (linkedDocument == null) return;
         linkedDocument.applyViewport(false);
 
-        slotBinder = new SlotDataBinder(menu);
-        slotBinder.setDisplayStateResolver(this::resolveMenuSlotDisplayState);
-        slotBinder.bindSlotsFromDocument(linkedDocument);
+        if (slotBinder == null) {
+            slotBinder = new SlotDataBinder(kuiMenu);
+            slotBinder.setDisplayStateResolver(this::resolveMenuSlotDisplayState);
+            slotBinder.bindSlotsFromDocument(linkedDocument);
+        }
         slotBinder.syncAllSlotPositions(linkedDocument, leftPos, topPos, true);
     }
 
@@ -320,6 +332,7 @@ public class KltytonContainerScreen extends AbstractContainerScreen<KltytonConta
         }
 
         linkedDocument.remove();
+        io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
         Size.clearViewportOverride();
         Cursor.resetToDefault();
         super.onClose();
@@ -329,9 +342,12 @@ public class KltytonContainerScreen extends AbstractContainerScreen<KltytonConta
     public void removed() {
         if (linkedDocument != null) {
             linkedDocument.remove();
+            io.github.kltyton.kltytonui.render.ScreenDocumentCache.detach(linkedDocument);
+            linkedDocument = null;
         }
         if (slotBinder != null) {
             slotBinder.clear();
+            slotBinder = null;
         }
         Size.clearViewportOverride();
         super.removed();

@@ -9,8 +9,8 @@ import java.util.List;
  * Loader-side networking and server menu access.
  *
  * <p>Implemented by the Forge network layer and registered through
- * {@link KuiServices}. Common KJS bindings use this interface instead of the
- * loader's network classes directly.</p>
+ * {@link KuiServices}. Common code uses this interface instead of the loader's
+ * network classes directly.</p>
  */
 public interface KuiNetworkService {
     /** Creates a pending container menu for the given player. */

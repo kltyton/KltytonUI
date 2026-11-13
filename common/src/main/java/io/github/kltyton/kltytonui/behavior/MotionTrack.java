@@ -30,9 +30,11 @@ public final class MotionTrack {
             "position", "top", "right", "bottom", "left",
             "margin", "marginTop", "marginBottom", "marginLeft", "marginRight",
             "padding", "paddingTop", "paddingBottom", "paddingLeft", "paddingRight",
-            "border", "borderTop", "borderBottom", "borderLeft", "borderRight"
+            "border", "borderTop", "borderBottom", "borderLeft", "borderRight",
+            "gap", "rowGap", "columnGap", "gridTemplateColumns", "gridTemplateRows"
     };
     private static final String[] VISUAL_BOX_PROPS = {
+            "borderTop", "borderRight", "borderBottom", "borderLeft",
             "borderRadius", "boxShadow",
             "backgroundColor", "backgroundImage", "backgroundRepeat", "backgroundSize", "backgroundPosition",
             "borderImage", "borderImageSource", "borderImageSlice", "borderImageWidth", "borderImageOutset", "borderImageRepeat"
@@ -272,12 +274,7 @@ public final class MotionTrack {
         RenderElement renderer = element.getRenderer();
         if (!localGeometry) {
             layoutRoots.add(element);
-            element.forEachRoute(e -> {
-                RenderElement routeRenderer = e.getRenderer();
-                routeRenderer.invalidateLayoutVersion();
-                routeRenderer.size.clear();
-                routeRenderer.box.clear();
-            });
+            renderer.invalidateLayoutAncestors();
             if (element.parentElement != null) {
                 element.parentElement.children.forEach(sibling -> sibling.getRenderer().position.clear());
                 hitTestRoots.add(element.parentElement);

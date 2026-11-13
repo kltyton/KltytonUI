@@ -23,20 +23,20 @@ KltytonUI 是一个 Minecraft 模组：用 HTML、CSS、JavaScript 写游戏 UI�
 
 仓库当前包含以下 target。此表反映源码中的实现与 CI 配置，不代表每个 target 都已作为发布文件提供：
 
-| Target | MC | 页面脚本 | KubeJS 的 `KltytonUI` 绑定 | CI JDK |
-| --- | --- | --- | --- | --- |
-| Forge | 1.18.2 | 支持 | 不提供 | 21 |
-| Forge | 1.19.2 | 支持 | 不提供 | 21 |
-| Forge | 1.20.1 | 支持 | 提供 | 21 |
-| Fabric | 1.20.1 | 支持 | 不提供 | 17 |
-| Fabric | 1.21.1 | 支持 | 不提供 | 21 |
-| NeoForge | 1.21.1 | 支持 | 提供 | 21 |
-| Fabric | 26.1 | 支持 | 不提供 | 25 |
-| Fabric | 26.2 | 支持 | 不提供 | 25 |
-| NeoForge | 26.1 | 支持 | 不提供 | 25 |
-| NeoForge | 26.2 | 支持 | 不提供 | 25 |
+| Target | MC | 页面脚本| CI JDK |
+| --- | --- | --- | --- |
+| Forge | 1.18.2 | 支持 | 21 |
+| Forge | 1.19.2 | 支持 | 21 |
+| Forge | 1.20.1 | 支持 | 21 |
+| Fabric | 1.20.1 | 支持 | 17 |
+| Fabric | 1.21.1 | 支持 | 21 |
+| NeoForge | 1.21.1 | 支持 | 21 |
+| Fabric | 26.1 | 支持 | 25 |
+| Fabric | 26.2 | 支持 | 25 |
+| NeoForge | 26.1 | 支持 | 25 |
+| NeoForge | 26.2 | 支持 | 25 |
 
-Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标中共用，版本适配由各目标实现。页面脚本不依赖 KubeJS；运行环境须安装对应的 Rhino。游戏内的资源管理器、DevTools 和资源重载按键默认未绑定，需在 MC 控制设置中自行绑定。
+各目标共用 Java API、HTML/CSS 渲染器和内嵌的 NeonJS 页面运行时。每个文档都有独立的 JavaScript Realm。游戏内的资源管理器、DevTools 和资源重载按键可在 Minecraft 控制设置中绑定。
 
 ## 页面里能用什么
 
@@ -64,7 +64,6 @@ Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标�
 
 **Java**：统一入口 `io.github.kltyton.kltytonui.KltytonUI`——`createDocument`、`new KltytonScreen(path)`、`menu(player, path).bind(...)`、`createWorldWindow(...)`。
 
-**KubeJS**：全局 `KltytonUI` 的客户端/服务端绑定仅在 Forge 1.20.1 和 NeoForge 1.21.1 提供，方法集按侧隔离（客户端管 Document/Toast/WorldWindow，服务端管容器）。模组也可在支持的环境注册自己的 KJS 绑定。
 
 完整 API 表和线程/空值/刷新规则：[模组专属 API](kltytonui-api)。
 
@@ -81,7 +80,6 @@ Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标�
 ## 给模组作者的扩展点
 
 - 注册自己的 HTML 标签：`@ElementRegister` + 扫描包，自定义绘制或纯语义元素都行；
-- 注册自己的 KubeJS 全局对象：`@KJSBindings`；
 - 内置 Java 组件库直接复用：DialogWindow、ContextMenu、ToastManager、Tooltip、ColorPicker、FilePicker：[内置 UI 库](ui-library)。
 
 线程规则、刷新代次、注册细节：[二次开发](secondary-development)。
@@ -105,12 +103,12 @@ Java common API、HTML/CSS 渲染与独立 Rhino 页面运行时在这些目标�
 | WebView / iframe | [webview.md](webview) |
 | 缩放、选择、剪贴板等辅助行为 | [browser-features.md](browser-features) |
 | 资源路径和资源管理器 | [resource-manager.md](resource-manager) |
-| KJS / Java 模组 API | [kltytonui-api.md](kltytonui-api) |
+| Java 模组 API | [kltytonui-api.md](kltytonui-api) |
+| 自定义元素与帧调度 | [secondary-development.md](secondary-development) |
 | Ore 主题和可视化编辑器 | [ore-theme.md](ore-theme) |
 | McUI 主题 | [mcui-theme.md](mcui-theme) |
 | Java 组件库 | [ui-library.md](ui-library) |
 | 游戏内 DevTools | [devtools.md](devtools) |
-| 自定义元素 / KJS 绑定 / 帧耗时 | [secondary-development.md](secondary-development) |
 | 外部调试协议、MCP、截图工具 | [tools.md](tools) |
 | WPT 布局对比 | [wpt.md](wpt) |
 | Maven 附件、签名与发布 | [maven-publishing.md](maven-publishing) |

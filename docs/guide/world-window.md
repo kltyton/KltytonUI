@@ -2,7 +2,6 @@
 
 WorldWindow 把 HTML Document 渲染成 Minecraft 世界里的一块平面：信息牌、机器外屏、实体头顶标签、漂浮提示。它不是 Screen 也不是 Overlay——有世界坐标、朝向、透视缩放、方块遮挡，交互靠准心射线。页面本身还是普通的 KUI 页面，DOM、事件、表单能力都能用。
 
-本文的 KubeJS 示例适用于 Forge 1.20.1 和 NeoForge 1.21.1；Java API 可用于其他 target。详见[总览](overview#loader-与脚本支持)。
 
 ## 最小示例
 
@@ -13,7 +12,7 @@ WorldWindow 把 HTML Document 渲染成 Minecraft 世界里的一块平面：信
 <meta name="kui-mouse-events" content="intercept">
 ```
 
-Java 创建（KubeJS 客户端脚本同 API，坐标直接传 x, y, z）：
+Java 创建：
 
 ```java
 WorldWindow window = KltytonUI.createWorldWindow(
@@ -36,7 +35,8 @@ KltytonUI.removeWorldWindow(window);   // 不用时移除，Document 一起销�
 - 刷新（触发「重载资源」）会重建 DOM、重跑脚本，但**保留 WorldWindow 实例**——位置、朝向、距离等设置不会清零；
 - 旧 Element 引用刷新后失效，老规矩；
 - 改位置、旋转、深度这些空间属性不需要重建 Document，直接 set 就行；
-- 同一实例别重复 `addWindow`，会重复绘制、重复收事件。
+- 同一实例别重复 `addWindow`，会重复绘制、重复收事件；
+- 世界窗口只存在于玩家客户端。断开连接或退回标题界面时，框架会清空所有世界窗口及其 Document，不会跨存档残留。
 
 ## 尺寸：viewport、自动缩放、手动缩放
 
@@ -60,7 +60,7 @@ KltytonUI.removeWorldWindow(window);   // 不用时移除，Document 一起销�
 window.setPosition(entity.position().add(0, entity.getBbHeight() + 0.25, 0));  // 实体头顶
 ```
 
-旋转推荐 `setRotation(yaw, pitch, roll)`，单位度。**坑**：`setRotation(Vec3)` 的参数顺序是 `(pitch, yaw, roll)`，不是 yaw 在前——这是历史兼容。KubeJS 的三参重载绑定层已经帮你转好了，正常传 yaw, pitch, roll 即可。四元数用 `setOrientation(Quaternionf)`（会复制一份）。
+旋转推荐 `setRotation(yaw, pitch, roll)`，单位度。**坑**：`setRotation(Vec3)` 的参数顺序是 `(pitch, yaw, roll)`，不是 yaw 在前——这是历史兼容。四元数用 `setOrientation(Quaternionf)`（会复制一份）。
 
 `setFacing(true)` 每帧面向摄像机，适合标签；要固定朝向的牌子就别开。
 

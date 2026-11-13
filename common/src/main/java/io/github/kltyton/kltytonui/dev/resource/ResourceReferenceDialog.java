@@ -34,7 +34,6 @@ public final class ResourceReferenceDialog {
     private Element optionGrid;
     private Element codeArea;
     private Element familyInput;
-    private Element languageSelect;
     private Element copyButton;
     private List<ReferenceOption> options = List.of();
     private int selectedIndex;
@@ -62,7 +61,6 @@ public final class ResourceReferenceDialog {
         Element root = dialog.content();
         root.setAttribute("style", "position:relative;flex:1;min-height:0;display:flex;flex-direction:column;");
         if (ResourceFontAsset.isFont(entry)) root.append(createFamilyField());
-        if (html) root.append(createLanguageField());
 
         optionGrid = element("DIV", "resource-reference-grid" + (html ? " resource-reference-html-grid" : ""));
         root.append(optionGrid);
@@ -112,34 +110,9 @@ public final class ResourceReferenceDialog {
         return field;
     }
 
-    private Element createLanguageField() {
-        Element field = element("DIV", "dialog-field resource-reference-language-field");
-        field.append(text("LABEL", "LANGUAGE", "dialog-label"));
-        Element selectWrap = element("DIV", "dialog-select-wrap");
-        languageSelect = element("SELECT", "dialog-select resource-reference-language-select");
-        languageSelect.setAttribute("data-native-arrow", "false");
-        languageSelect.append(option("JAVA", "java"));
-        languageSelect.append(option("KUBEJS / KJS", "kjs"));
-        languageSelect.setValue("java");
-        languageSelect.addEventListener("input", event -> rebuildOptions());
-        languageSelect.addEventListener("change", event -> rebuildOptions());
-        selectWrap.append(languageSelect);
-        selectWrap.append(text("DIV", "\u25be", "dialog-select-arrow"));
-        field.append(selectWrap);
-        return field;
-    }
-
-    private Element option(String label, String value) {
-        Element option = text("OPTION", label, "resource-reference-language-option");
-        option.setAttribute("value", value);
-        return option;
-    }
-
     private void rebuildOptions() {
         if (optionGrid == null || entry == null) return;
-        options = optionsFor(entry,
-                familyInput == null ? "" : familyInput.value,
-                languageSelect == null ? "java" : languageSelect.getValue());
+        options = optionsFor(entry, familyInput == null ? "" : familyInput.value);
         selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, options.size() - 1)));
         optionGrid.clearChildren();
         for (int index = 0; index < options.size(); index++) {
@@ -205,18 +178,12 @@ public final class ResourceReferenceDialog {
         optionGrid = null;
         codeArea = null;
         familyInput = null;
-        languageSelect = null;
         copyButton = null;
         options = List.of();
         selectedIndex = 0;
     }
 
     static List<ReferenceOption> optionsFor(Loader.StaticResourceEntry entry, String requestedFamily) {
-        return optionsFor(entry, requestedFamily, "java");
-    }
-
-    static List<ReferenceOption> optionsFor(Loader.StaticResourceEntry entry, String requestedFamily,
-                                            String requestedLanguage) {
         if (isImage(entry)) {
             String path = rootPath(entry.path());
             String alt = htmlAttribute(fileStem(entry.path()));
@@ -244,24 +211,6 @@ public final class ResourceReferenceDialog {
         }
         if (isHtml(entry)) {
             String path = codeString(ResourcePath.normalize(entry.path()));
-            boolean kjs = "kjs".equalsIgnoreCase(ResourcePath.safe(requestedLanguage));
-            if (kjs) {
-                return List.of(
-                        new ReferenceOption("SCREEN", "OPEN A STANDARD UI SCREEN", SCREEN_ICON,
-                                "KltytonUI.screen(\"" + path + "\")"),
-                        new ReferenceOption("CONTAINER", "OPEN A SERVER-BOUND CONTAINER", CONTAINER_ICON,
-                                "KltytonUI.menu(player, \"" + path
-                                        + "\").bind(bindings => bindings.player())"),
-                        new ReferenceOption("OVERLAY", "CREATE A SCREEN OVERLAY DOCUMENT", OVERLAY_ICON,
-                                "let overlay = KltytonUI.createDocument(\"" + path + "\")"),
-                        new ReferenceOption("IN-WORLD", "RENDER HTML ON A WORLD PLANE", WORLD_ICON,
-                                "let worldWindow = KltytonUI.createWorldWindow(\n"
-                                        + "    \"" + path + "\",\n"
-                                        + "    0, 64, 0,\n"
-                                        + "    16\n"
-                                        + ")")
-                );
-            }
             return List.of(
                     new ReferenceOption("SCREEN", "OPEN A STANDARD UI SCREEN", SCREEN_ICON,
                             "KltytonUI.screen(\"" + path + "\");"),

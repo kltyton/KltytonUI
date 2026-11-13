@@ -29,10 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code KuiRenderService} is materialised here as cached pipeline/render-type
  * combinations.</p>
  *
- * <p>Stencil is deliberately absent from the key: vanilla 26.2 pipelines cannot
- * carry it (NeoForge patches stencil into {@code DepthStencilState}), and the
- * Fabric backend reports stencil as unavailable, so masks degrade to the
- * scissor path there.</p>
+ * <p>Stencil is absent from the key because vanilla 26.2 pipelines do not expose
+ * stencil tests. The Fabric backend reports stencil as unavailable.</p>
  */
 public final class PipelineCache {
     private static final Map<Key, RenderType> TYPES = new ConcurrentHashMap<>();

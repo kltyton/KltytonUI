@@ -337,7 +337,7 @@ public class Operation {
                                 Event.tiggerEvent(clipboard);
                                 if (!clipboard.defaultPrevented) {
                                     if (!selectedText.isEmpty()) setClipboardText(selectedText);
-                                    textElement.replaceSelection("");
+                                    textElement.replaceSelection("", "deleteByCut");
                                     documentCanceled[0] = true;
                                     return;
                                 }
@@ -351,7 +351,7 @@ public class Operation {
                                 Event.markTrustedFromCurrentDispatch(clipboard);
                                 Event.tiggerEvent(clipboard);
                                 if (!clipboard.defaultPrevented) {
-                                    textElement.insertText(getClipboardText());
+                                    textElement.insertText(getClipboardText(), "insertFromPaste");
                                     documentCanceled[0] = true;
                                     return;
                                 }

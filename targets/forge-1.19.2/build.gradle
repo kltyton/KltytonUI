@@ -236,12 +236,8 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation ("maven.modrinth:rhino:6m33q64a")
+    testRuntimeOnly 'com.ibm.icu:icu4j:70.1'
 
-    // KubeJS/Rhino are compile-only integration targets (Rhino 1.19.2 build).
-    // They are not shipped at runtime so the dev client loads standalone.
-    modCompileOnly ("maven.modrinth:kubejs:ByN6240z")
-    modCompileOnly ("maven.modrinth:rhino:6m33q64a")
 
     // Minecraft only adopted JOML in 1.19.3; KUI's shared render code is built on
     // org.joml types, so 1.19.2 has to supply the library itself. implementation 覆盖
@@ -582,4 +578,5 @@ tasks.named('jacocoTestReport', JacocoReport).configure {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

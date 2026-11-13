@@ -446,10 +446,10 @@ class CssCompatibilityTest {
         assertEquals("#334455", child.getComputedStyle().color);
         assertEquals("9px 4px", child.getComputedStyle().gap);
 
-        child.setAttribute("style", "gap: unset;");
-        assertEquals("0px", child.getComputedStyle().gap);
-        assertEquals("0px", child.getComputedStyle().rowGap);
-        assertEquals("0px", child.getComputedStyle().columnGap);
+        child.setAttribute("style", "display: grid; gap: unset;");
+        assertEquals("normal", child.getComputedStyle().gap);
+        assertEquals("normal", child.getComputedStyle().rowGap);
+        assertEquals("normal", child.getComputedStyle().columnGap);
     }
 
     @Test
@@ -500,8 +500,9 @@ class CssCompatibilityTest {
         assertEquals("unset", solid.backgroundImage);
 
         Style varColor = new Style();
-        varColor.merge("background: var(--blue-panel);");
-        assertEquals("var(--blue-panel)", varColor.backgroundColor);
+        varColor.merge("--blue-panel: #123456; background: var(--blue-panel);");
+        varColor.resolveVarReferences(null);
+        assertEquals("#123456", varColor.backgroundColor);
         assertEquals("unset", varColor.backgroundImage);
     }
 
@@ -585,7 +586,7 @@ class CssCompatibilityTest {
         assertEquals("inline-grid", element.getComputedStyle().display);
 
         element.setAttribute("style", "display: table;");
-        assertEquals("block", element.getComputedStyle().display);
+        assertEquals("table", element.getComputedStyle().display);
 
         element.setAttribute("style", "display: inline-table;");
         assertEquals("inline-block", element.getComputedStyle().display);
@@ -620,11 +621,10 @@ class CssCompatibilityTest {
             row.appendChild(document.createElement("th"));
         }
 
-        assertEquals("block", table.getComputedStyle().display);
-        assertEquals("block", head.getComputedStyle().display);
-        assertEquals("grid", row.getComputedStyle().display);
-        assertEquals("repeat(3, minmax(0, 1fr))", row.getComputedStyle().gridTemplateColumns);
-        assertEquals("block", row.getChildren().get(0).getComputedStyle().display);
+        assertEquals("table", table.getComputedStyle().display);
+        assertEquals("table-header-group", head.getComputedStyle().display);
+        assertEquals("table-row", row.getComputedStyle().display);
+        assertEquals("table-cell", row.getChildren().get(0).getComputedStyle().display);
 
         Element.DOMRect first = row.getChildren().get(0).getBoundingClientRect();
         Element.DOMRect second = row.getChildren().get(1).getBoundingClientRect();

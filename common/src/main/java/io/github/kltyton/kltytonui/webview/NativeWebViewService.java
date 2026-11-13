@@ -21,7 +21,7 @@ public final class NativeWebViewService implements KuiWebViewService {
 
     public static final NativeWebViewService INSTANCE = new NativeWebViewService();
 
-    /** Only a ceiling: the host never overlaps two captures, so a slow codec throttles itself. */
+    /** Requested cadence before the native host applies its shared capture budget and idle backoff. */
     private static final int DEFAULT_FRAME_INTERVAL_MS = 16;
 
     /**
@@ -85,9 +85,21 @@ public final class NativeWebViewService implements KuiWebViewService {
 
     @Override
     public View create(String url, int width, int height, boolean transparent, int frameIntervalMs) {
+        return create(url, width, height, transparent, frameIntervalMs,
+                transparent ? CAPTURE_LOSSLESS : CAPTURE_AUTO);
+    }
+
+    @Override
+    public View create(String url, int width, int height, boolean transparent, int frameIntervalMs, int captureQuality) {
         if (!WebViewNative.isAvailable()) {
             return null;
         }
+        int format = switch (captureQuality) {
+            case CAPTURE_STREAM -> FORMAT_STREAM;
+            case CAPTURE_LOSSLESS -> FORMAT_PNG;
+            case CAPTURE_FAST -> FORMAT_JPEG;
+            default -> transparent ? FORMAT_PNG : FORMAT_AUTO;
+        };
         long handle = WebViewNative.create(
                 url,
                 userDataDirectory(),
@@ -96,15 +108,11 @@ public final class NativeWebViewService implements KuiWebViewService {
                 transparent,
                 true,
                 frameIntervalMs <= 0 ? DEFAULT_FRAME_INTERVAL_MS : Math.max(8, frameIntervalMs),
-                // Auto lets the host prefer its raw composition stream and, when that is
-                // unavailable, choose between WebView2's lossless (PNG) and lossy (JPEG)
-                // codecs by whether the page is actually changing. JPEG has no alpha, so a
-                // transparent view has to be pinned to the lossless codec.
-                transparent ? FORMAT_PNG : FORMAT_AUTO);
+                format);
         if (handle == 0L) {
             return null;
         }
-        return new NativeView(handle);
+        return new NativeView(handle, transparent);
     }
 
     /**
@@ -135,6 +143,7 @@ public final class NativeWebViewService implements KuiWebViewService {
 
     private static final class NativeView implements View {
         private final long handle;
+        private final boolean transparent;
         private boolean closed;
         private NativeChannel channel;
         /**
@@ -147,8 +156,9 @@ public final class NativeWebViewService implements KuiWebViewService {
          */
         private int pressedButtons;
 
-        private NativeView(long handle) {
+        private NativeView(long handle, boolean transparent) {
             this.handle = handle;
+            this.transparent = transparent;
         }
 
         @Override
@@ -202,7 +212,7 @@ public final class NativeWebViewService implements KuiWebViewService {
                 case CAPTURE_STREAM -> WebViewNative.setFrameFormat(handle, FORMAT_STREAM);
                 case CAPTURE_LOSSLESS -> WebViewNative.setFrameFormat(handle, FORMAT_PNG);
                 case CAPTURE_FAST -> WebViewNative.setFrameFormat(handle, FORMAT_JPEG);
-                default -> WebViewNative.setFrameFormat(handle, FORMAT_AUTO);
+                default -> WebViewNative.setFrameFormat(handle, transparent ? FORMAT_PNG : FORMAT_AUTO);
             }
         }
 
@@ -247,7 +257,7 @@ public final class NativeWebViewService implements KuiWebViewService {
                 }
             }
             pressedButtons = pressed ? (pressedButtons | flag) : (pressedButtons & ~flag);
-            int keys = modifierKeys(modifiers) | (pressed ? flag : 0);
+            int keys = modifierKeys(modifiers) | pressedButtons;
             WebViewNative.mouse(handle, kind, keys, 0, x, y);
         }
 
@@ -302,6 +312,21 @@ public final class NativeWebViewService implements KuiWebViewService {
                 return;
             }
             WebViewNative.eval(handle, script);
+        }
+
+        @Override
+        public void enableBridge(boolean enabled) {
+            if (!closed) WebViewNative.enableBridge(handle, enabled);
+        }
+
+        @Override
+        public String[] drainMessages() {
+            return closed ? new String[0] : WebViewNative.drainMessages(handle);
+        }
+
+        @Override
+        public boolean postMessage(long generation, String json) {
+            return !closed && WebViewNative.postMessage(handle, generation, json);
         }
 
         @Override

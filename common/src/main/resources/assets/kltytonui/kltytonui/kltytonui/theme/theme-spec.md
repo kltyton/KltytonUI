@@ -550,8 +550,8 @@ active 时 padding 上下互换 2px 模拟按下）。
 - `.scrollbar` > `.scrollbar-track` + `.scrollbar-thumb`（22px 宽立体滑块）；
   `.scrollbar-2` > `.scrollbar-2-track` + `.scrollbar-2-thumb`（18px 细条）。
 
-**数据展示**：`.table-wrap` > `.table`（thead/tbody block、tr grid 4 列，
-th/td 2px 分隔线，tbody hover 行变色）；`.list-group` > `.list-group-item`
+**数据展示**：`.table-wrap` > `.table`（真 `<table>`，原生自动列宽、支持 rowspan/colspan，
+零间距独立边框、横向滚动，th/td 2px 分隔线，tbody hover 行变色）；`.list-group` > `.list-group-item`
 （`.active` 绿底）；`.list-group-2` > `.list-group-2-item`（内凹 hover 分割线）；
 `.pagination` > `.page-button`（`.active` 紫底）；`.inventory-grid` > `.slot`
 （9×44px 物品格，44px 方槽、白边 hover）；`.<name>-swatch` + 6 个色变体。

@@ -134,6 +134,10 @@ public class Gradient {
     }
 
     public static Gradient parse(String css) {
+        return parse(css, Color.DEFAULT_CURRENT_COLOR);
+    }
+
+    public static Gradient parse(String css, int currentColor) {
         if (css == null) return null;
         String trimmed = css.trim();
         boolean repeating = trimmed.startsWith("repeating-linear-gradient");
@@ -165,7 +169,7 @@ public class Gradient {
         for (int i = startIndex; i < parts.size(); i++) {
             String part = parts.get(i).trim();
             StopTokens stop = splitStop(part);
-            int color = Color.parse(stop.colorToken());
+            int color = Color.parse(stop.colorToken(), currentColor);
             boolean added = false;
             if (stop.positionToken() != null) {
                 // CSS 允许双位置色标（color start end），等价于同色的两个硬停止。

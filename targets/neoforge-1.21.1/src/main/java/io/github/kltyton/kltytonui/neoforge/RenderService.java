@@ -58,6 +58,13 @@ public final class RenderService implements KuiRenderService {
         return RenderSystem.getProjectionMatrix();
     }
 
+    @Override public void setModelViewMatrix(Matrix4f matrix) {
+        RenderSystem.getModelViewStack().set(matrix);
+        RenderSystem.applyModelViewMatrix();
+    }
+
+    @Override public Matrix4f getModelViewMatrix() { return RenderSystem.getModelViewMatrix(); }
+
     @Override
     public void enableDepthTest() {
         RenderSystem.enableDepthTest();
@@ -314,6 +321,22 @@ public final class RenderService implements KuiRenderService {
         RenderSystem.setShaderTexture(unit, target.<RenderTarget>as().getColorTextureId());
     }
 
+    @Override public void drawOffscreenTexture(Matrix4f matrix, FboHandle target, float width, float height) {
+        RenderStateScope state = pushFilterRenderState();
+        try {
+            bindColorTexture(target, 0);
+            setShader(GameRenderer.getPositionTexShader());
+            enableBlend();
+            setBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            MeshBuilder mesh = beginMesh(MeshMode.QUADS, MeshFormat.POSITION_TEX);
+            mesh.vertexUV(matrix, 0, height, 0, 0, 1);
+            mesh.vertexUV(matrix, width, height, 0, 1, 1);
+            mesh.vertexUV(matrix, width, 0, 0, 1, 0);
+            mesh.vertexUV(matrix, 0, 0, 0, 0, 0);
+            mesh.submit();
+        } finally { if (state != null) state.close(); }
+    }
+
     @Override
     public RenderStateScope pushFilterRenderState() {
         return LegacyFilterState.capture();
@@ -497,6 +520,16 @@ public final class RenderService implements KuiRenderService {
     @Override
     public void setPositionColorShader() {
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
+    }
+
+    @Override public Object getBackgroundShader() { return ShaderRegistry.getBackgroundShader(); }
+
+    @Override public void destroyBackgroundTarget(FboHandle target) {
+        io.github.kltyton.kltytonui.render.LegacyBackgroundTarget.destroy(this, target);
+    }
+
+    @Override public RenderStateScope pushBackgroundTarget(FboHandle target) {
+        return io.github.kltyton.kltytonui.render.LegacyBackgroundTarget.open(this, target);
     }
 
     @Override

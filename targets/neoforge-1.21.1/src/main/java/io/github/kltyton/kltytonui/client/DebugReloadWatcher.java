@@ -93,7 +93,12 @@ public final class DebugReloadWatcher {
             boolean handled = path.getFileName().toString().toLowerCase().endsWith(".html")
                     ? reloadTemplate(logicalPath)
                     : refreshAffectedDocuments(logicalPath);
-            if (handled) return;
+            if (handled) {
+                if (logicalPath.startsWith(ClientLoader.THEME_RESOURCE_ROOT) && logicalPath.endsWith(".css")) {
+                    ClientLoader.requestFilesystemThemeRescan();
+                }
+                return;
+            }
         }
         ClientLoader.reload();
         KltytonUI.LOGGER.info("[DebugReload] reload completed");
@@ -125,12 +130,14 @@ public final class DebugReloadWatcher {
      */
     private static boolean refreshAffectedDocuments(String logicalPath) {
         boolean stylesOnly = logicalPath.endsWith(".css");
-        Set<String> templates = logicalPath.equals("global.css") || logicalPath.equals("global.js")
+        boolean globalScript = logicalPath.equals("global.js") || logicalPath.equals("ecmascript.js");
+        if (globalScript) ClientLoader.invalidateGlobalJSSourceCache();
+        Set<String> templates = logicalPath.equals("global.css") || globalScript
                 ? null
                 : ResourceUsageIndex.affectedTemplates(logicalPath);
         if (stylesOnly) {
             StyleAsyncHandler.INSTANCE.invalidatePreparedStylesheets();
-        } else if (!logicalPath.equals("global.js")) {
+        } else if (!globalScript) {
             HTML.invalidatePreparedTemplates(templates);
         }
         int refreshed = refreshDocumentsOf(templates, stylesOnly);

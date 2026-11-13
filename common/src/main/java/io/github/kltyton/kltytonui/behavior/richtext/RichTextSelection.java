@@ -1,5 +1,6 @@
 package io.github.kltyton.kltytonui.behavior.richtext;
 
+import io.github.kltyton.kltytonui.script.host.HideFromScript;
 import io.github.kltyton.kltytonui.behavior.SelectionUnits;
 import io.github.kltyton.kltytonui.behavior.TextSelection;
 import io.github.kltyton.kltytonui.event.MouseEvent;
@@ -10,6 +11,7 @@ import io.github.kltyton.kltytonui.render.Drawer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 富文本编辑选区：锚点与终点均为（单元, 单元扁平文本归一化偏移），与
@@ -73,6 +75,14 @@ public final class RichTextSelection {
 
     public Element getEndUnit() {
         return endUnit;
+    }
+
+    @HideFromScript
+    public void collectScriptRoots(Set<Node> roots) {
+        if (anchorUnit != null) roots.add(anchorUnit);
+        if (endUnit != null) roots.add(endUnit);
+        if (lastNotifiedAnchorUnit != null) roots.add(lastNotifiedAnchorUnit);
+        if (lastNotifiedEndUnit != null) roots.add(lastNotifiedEndUnit);
     }
 
     public int getEndOffset() {

@@ -41,6 +41,8 @@ import io.github.kltyton.kltytonui.world.WorldWindow;
 
 @EventBusSubscriber(modid = KltytonUI.MODID, value = Dist.CLIENT)
 public class Client {
+    private static final boolean DEVELOPMENT_TESTS_PRESENT = KltytonUI.class.getResource(
+            "/io/github/kltyton/kltytonui/client/ClientRuntimeSelfTest.class") != null;
     public static final HashMap<String, Integer> KEY_MAP = new HashMap<>();
     private static int lastWindowWidth = -1;
     private static int lastWindowHeight = -1;
@@ -421,7 +423,9 @@ public class Client {
 
     @SubscribeEvent
     public static void tick(ClientTickEvent.Pre event) {        CursorReleaseController.tick();
-            ClientRuntimeSelfTest.tick();
+            if (DEVELOPMENT_TESTS_PRESENT && !io.github.kltyton.kltytonui.spi.KuiServices.client().isProduction()) {
+                ClientRuntimeSelfTest.tick();
+            }
             io.github.kltyton.kltytonui.loader.ClientLoaderForge.tickTemplateScanRetry();
             if (KltytonUIConfig.consumeClientReloadPending()) {
                 io.github.kltyton.kltytonui.dev.debug.ExternalDebugServer.reconcileConfiguration();

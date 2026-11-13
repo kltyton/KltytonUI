@@ -57,16 +57,12 @@ tasks.named('compileJava').configure { dependsOn 'prepareCommonSources' }
 repositories {
     mavenCentral()
     maven { url = 'https://www.cursemaven.com' }
-    maven { url = 'https://maven.latvian.dev/releases' }
 }
 
 dependencies {
     minecraft "com.mojang:minecraft:${fabric_minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
-
-    // common exposes Rhino callback types even when KubeJS is absent.
-    implementation "dev.latvian.mods:rhino:${rhino_fabric_version}"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -84,8 +80,6 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching('kltytonui.mixins.json') {
         filter { line -> line.contains(excludedMixinRefmap) ? null : line }
     }
-    // Fabric does not provide the NeoForge KubeJS plugin named by this descriptor.
-    exclude 'kubejs.plugins.txt'
     def replaceProperties = [
             minecraft_version: fabric_minecraft_version,
             fabric_loader_version: fabric_loader_version,
@@ -136,4 +130,5 @@ tasks.matching { it.name == 'runClient' }.configureEach {
     }
 }
 
+apply from: file('../../gradle/target-conventions/neon.gradle')
 apply from: file('../../gradle/target-conventions/publish.gradle')

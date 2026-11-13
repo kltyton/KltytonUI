@@ -2,22 +2,73 @@ package io.github.kltyton.kltytonui.element;
 
 import io.github.kltyton.kltytonui.init.Document;
 import io.github.kltyton.kltytonui.init.Element;
+import io.github.kltyton.kltytonui.init.Node;
+import io.github.kltyton.kltytonui.dom.TextNode;
+import io.github.kltyton.kltytonui.dom.expander.RecipeExpander;
 import io.github.kltyton.kltytonui.registry.annotation.ElementRegister;
+import io.github.kltyton.kltytonui.render.BodyRenderNodeProvider;
+import io.github.kltyton.kltytonui.render.RenderNode;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @ElementRegister(Recipe.TAG_NAME)
-public class Recipe extends MinecraftElement {
+public class Recipe extends MinecraftElement implements BodyRenderNodeProvider {
     public static final String TAG_NAME = "RECIPE";
+    public final RecipeExpander.PreviewState previewState = new RecipeExpander.PreviewState();
+    private List<Node> sourceRenderChildren;
+    private List<Node> previewRenderChildren = List.of();
 
     public Recipe(Document document) {
         super(document, TAG_NAME);
     }
 
+    @Override
+    public void setTextContent(String value) {
+        super.setTextContent(value);
+        previewState.invalidate();
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        previewState.update(this, System.nanoTime() / 1_000_000L, false);
+    }
+
+    @Override
+    public List<RenderNode> createBodyRenderNodes() {
+        return List.of(new RenderNode.ElementBackgroundNode(this));
+    }
+
+    @Override
+    public List<Node> getRenderChildNodes() {
+        List<Node> nodes = super.getRenderChildNodes();
+        if (nodes != sourceRenderChildren) {
+            sourceRenderChildren = nodes;
+            previewRenderChildren = nodes.stream().filter(node -> !(node instanceof TextNode)).toList();
+        }
+        return previewRenderChildren;
+    }
+
+    public String getOutputItemExpression() {
+        String output = getAttribute("output");
+        if (output != null) return output;
+        StringBuilder text = new StringBuilder();
+        for (Node child : childNodes) {
+            if (child instanceof TextNode textNode) text.append(textNode.getTextContent());
+        }
+        return text.isEmpty() ? innerText : text.toString();
+    }
+
     public ResourceLocation parseRecipeIdFromInnerText() {
         String normalized = normalizeRecipeIdLiteral(innerText);
+        if (normalized.isBlank()) return null;
+        return ResourceLocation.tryParse(normalized);
+    }
+
+    public ResourceLocation parseOutputItemId() {
+        String normalized = normalizeOutputItemLiteral(getOutputItemExpression());
         if (normalized.isBlank()) return null;
         return ResourceLocation.tryParse(normalized);
     }
@@ -33,6 +84,10 @@ public class Recipe extends MinecraftElement {
             changed = true;
         }
         return changed;
+    }
+
+    public static String normalizeOutputItemLiteral(String raw) {
+        return normalizeRecipeIdLiteral(raw);
     }
 
     public static String normalizeRecipeIdLiteral(String raw) {

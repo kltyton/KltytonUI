@@ -34,7 +34,7 @@ class FrameUpdateChannelTest {
     private static final int OFF_READ_SEQ = 96;
     private static final int OFF_FLAGS = 28;
 
-    /** Minimal producer: writes packets into a heap buffer with the host's layout. */
+    /** Minimal producer: writes packets into a direct buffer with the host's layout. */
     private static final class FakeHost {
         final ByteBuffer buffer;
         final int arena;
@@ -47,7 +47,7 @@ class FrameUpdateChannelTest {
             this.arena = arena;
             this.canvasWidth = canvasWidth;
             this.canvasHeight = canvasHeight;
-            this.buffer = ByteBuffer.allocate(HEADER_BYTES + arena).order(ByteOrder.LITTLE_ENDIAN);
+            this.buffer = ByteBuffer.allocateDirect(HEADER_BYTES + arena).order(ByteOrder.LITTLE_ENDIAN);
             buffer.putInt(0, MAGIC);
             buffer.putInt(4, VERSION);
             buffer.putInt(8, HEADER_BYTES);
