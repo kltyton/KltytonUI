@@ -71,19 +71,19 @@ public class HostObject extends JSObject {
     }
 
     private HostMethodFunction method(String name) {
+        HashMap<String, HostMethodFunction> cache = methodCache;
+        HostMethodFunction function = cache == null ? null : cache.get(name);
+        if (function != null) return function;
         List<Method> overloads = info.instanceMethods.get(name);
         if (overloads == null) {
             Method single = info.overload(name, false);
             if (single == null) return null;
             overloads = List.of(single);
         }
-        HashMap<String, HostMethodFunction> cache = methodCache;
         if (cache == null) {
             cache = new HashMap<>();
             methodCache = cache;
         }
-        HostMethodFunction function = cache.get(name);
-        if (function != null) return function;
         int open = name.indexOf('(');
         String display = open < 0 ? name : name.substring(0, open);
         function = new HostMethodFunction(bridge, display, overloads, target);
@@ -144,11 +144,7 @@ public class HostObject extends JSObject {
     }
 
     private Object read(Field field) {
-        try {
-            return field.get(target);
-        } catch (IllegalAccessException denied) {
-            throw JSException.typeError("Cannot access field " + field.getName());
-        }
+        return info.fieldAccess(field).read(target);
     }
 
     private JSObject iteratorFunction() {
@@ -238,7 +234,34 @@ public class HostObject extends JSObject {
 
     @Override
     public boolean hasOwnProperty(Object key) {
-        return member(key) != NotFound.INSTANCE;
+        return getOwnPropertyAttributes(key) >= 0;
+    }
+
+    @Override
+    public int getOwnPropertyAttributes(Object key) {
+        if (key instanceof Integer index) {
+            if (isArrayLike()) return index >= 0 && index < length() ? Attr.WRITABLE | Attr.ENUMERABLE : -1;
+            return isMap() && mapContains(key.toString()) ? Attr.WRITABLE | Attr.ENUMERABLE : -1;
+        }
+        if (key instanceof JSSymbol symbol) return symbol == JSSymbol.iterator && isIterable() ? 0 : -1;
+        if (!(key instanceof String name)) return -1;
+        if (name.equals("length") && isArrayLike()) return 0;
+        boolean collection = isMap() || isArrayLike();
+        Field field = info.instanceFields.get(name);
+        if (field != null) return (Modifier.isFinal(field.getModifiers()) ? 0 : Attr.WRITABLE)
+                | (collection ? 0 : Attr.ENUMERABLE);
+        if (info.instanceMethods.containsKey(name) || info.overload(name, false) != null) return 0;
+        if (info.instanceGetters.containsKey(name)) return (info.instanceSetters.containsKey(name) ? Attr.WRITABLE : 0)
+                | (collection ? 0 : Attr.ENUMERABLE);
+        return isMap() && mapContains(name) ? Attr.WRITABLE | Attr.ENUMERABLE : -1;
+    }
+
+    private boolean mapContains(String name) {
+        try {
+            return ((Map<?, ?>) target).containsKey(name);
+        } catch (RuntimeException error) {
+            throw bridge.hostError(error);
+        }
     }
 
     @Override
@@ -274,9 +297,7 @@ public class HostObject extends JSObject {
         if (field != null) {
             if (Modifier.isFinal(field.getModifiers())) return false;
             try {
-                field.set(target, bridge.toField(value, field));
-            } catch (IllegalAccessException denied) {
-                return false;
+                info.fieldAccess(field).write(target, bridge.toField(value, field));
             } catch (IllegalArgumentException error) {
                 throw JSException.typeError("Cannot set field " + key + ": " + error.getMessage());
             }

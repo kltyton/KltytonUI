@@ -8,7 +8,54 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class NeonHostObjectTest {
+public class NeonHostObjectTest {
+    public static final class HostFields {
+        public int value = 7;
+        public int observedReadCount;
+        public int getObserved() { return ++observedReadCount; }
+        public String echo(String value) { return value; }
+    }
+
+    @Test
+    void hostEnumerationDoesNotReadBeanValuesAndExplicitDescriptorsRemainLive() {
+        TestDocumentFactory.withNeonDocument(document -> {
+            eval("""
+                    var h = new (Java.type('io.github.kltyton.kltytonui.webapi.NeonHostObjectTest$HostFields'))();
+                    var present = 'observed' in h;
+                    var keys = Object.keys(h), names = [];
+                    for (var name in h) names.push(name);
+                    var quiet = h.observedReadCount;
+                    var descriptor = Object.getOwnPropertyDescriptor(h, 'observed');
+                    h.value = 9;
+                    document.body.setAttribute('data-result', [present, keys.includes('observed'),
+                      names.includes('observed'), quiet, descriptor.value, h.observedReadCount,
+                      h.value, h.echo === h.echo, h.echo('bound')].join('|'));
+                    """);
+            assertEquals("true|true|true|0|1|1|9|true|bound", document.body.getAttribute("data-result"));
+        });
+    }
+
+    @Test
+    void guestProxyEnumerationRetainsDescriptorTrapsOrderAndShadowing() {
+        TestDocumentFactory.withNeonDocument(document -> {
+            eval("""
+                    var trace = [], target = {a: 1, b: 2};
+                    var proxy = new Proxy(target, {
+                      ownKeys: function() { return ['b', 'a']; },
+                      getOwnPropertyDescriptor: function(t, k) {
+                        trace.push(k); return Reflect.getOwnPropertyDescriptor(t, k);
+                      }
+                    });
+                    var keys = Object.keys(proxy).join(',');
+                    var child = Object.create({hidden: 1, shown: 2});
+                    Object.defineProperty(child, 'hidden', {value: 3});
+                    var visible = []; for (var key in child) visible.push(key);
+                    document.body.setAttribute('data-result', keys + '|' + trace.join(',') + '|' + visible.join(','));
+                    """);
+            assertEquals("b,a|b,a|shown", document.body.getAttribute("data-result"));
+        });
+    }
+
     private static void eval(String code) {
         NeonPageRuntime.eval(code, null, "host-object-test");
     }

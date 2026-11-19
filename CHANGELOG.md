@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.2 - 2026-11-19
+
+### Changed
+
+- Enumerate NeonJS host properties without reading their values, reuse linked Java field accessors, and tier frequently called page functions into the background compiler sooner.
+- Reuse unconsumed CSS cascades during custom-property lookup and reuse the existing style field accessors during resolution.
+
+### Fixed
+
+- Read inline declarations without triggering computed style or layout observation.
+- Keep eligible absolute and fixed subtree changes within local layout commits while updating the affected scroll bounds.
+
 ## 1.3.1 - 2026-11-13
 
 ### Changed

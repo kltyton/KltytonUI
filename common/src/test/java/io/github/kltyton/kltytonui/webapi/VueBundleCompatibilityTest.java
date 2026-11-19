@@ -147,6 +147,28 @@ class VueBundleCompatibilityTest {
         }
     }
 
+    @Test
+    void mcButtonsMountAndAddOneReactiveButtonWithoutLosingDisabledState() throws Exception {
+        page.eval(readRuntime("vue.kui.js"), "vue.kui.js");
+        page.eval(readRuntime("mcui-oreui.kui.js"), "mcui-oreui.kui.js");
+        page.eval("""
+                var buttonCount = Vue.ref(22);
+                var root = document.createElement('div'); document.body.appendChild(root);
+                var app = Vue.createApp({render:function() {
+                  return Vue.h('div', {id:'buttons'}, Array.from({length:buttonCount.value}, function(_, i) {
+                    return Vue.h(McUIVue.McButton, {key:i, disabled:i === 0}, function() {return 'Button ' + i;});
+                  }));
+                }});
+                app.mount(root);
+                document.body.setAttribute('data-first-count', String(root.querySelectorAll('button').length));
+                buttonCount.value++;
+                Vue.nextTick(function() { document.body.setAttribute('data-next-count', String(root.querySelectorAll('button').length)); });
+                """, "mcui-buttons");
+        assertEquals("22", page.document.body.getAttribute("data-first-count"));
+        assertEquals("23", page.awaitAttribute("data-next-count", 2000));
+        assertEquals(true, page.document.querySelector("button").isDisabled());
+    }
+
     private static String readRuntime(String name) throws Exception {
         return read(("vue.kui.js".equals(name) ? ROOT : COMPONENT_RUNTIME) + name);
     }

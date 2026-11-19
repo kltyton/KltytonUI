@@ -179,6 +179,7 @@ public final class NeonEngine {
         HostAccess access = NeonHostConverter.hostAccess();
         engine = dev.mooner.neonjs.NeonEngine.builder()
                 .hostAccess(access).autoRunJobs(false).intl(true).console(null)
+                .jitThreshold(32).backgroundCompilation(true)
                 .extension(realm -> anchor = realm).build();
         NeonContext created = null;
         try {

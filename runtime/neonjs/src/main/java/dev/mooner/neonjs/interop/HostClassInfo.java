@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -44,6 +45,11 @@ public final class HostClassInfo {
     public final HashMap<String, List<Method>> staticSetters = new HashMap<>();
     public final ArrayList<Constructor<?>> constructors = new ArrayList<>();
     public final HashMap<String, Class<?>> memberClasses = new HashMap<>();
+    private final ConcurrentHashMap<Field, HostFieldAccess> fieldAccessors = new ConcurrentHashMap<>();
+
+    HostFieldAccess fieldAccess(Field field) {
+        return fieldAccessors.computeIfAbsent(field, HostFieldAccess::new);
+    }
 
     /** The method a call of an instance runs, if instances are functions (see {@link #findFunctionalMethod}). */
     public Method functionalMethod;

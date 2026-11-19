@@ -5,8 +5,11 @@ import dev.mooner.neonjs.HostAccess;
 import dev.mooner.neonjs.NeonValue;
 import dev.mooner.neonjs.interop.ContextGate;
 import dev.mooner.neonjs.interop.HostBridge;
+import dev.mooner.neonjs.interop.HostObject;
+import dev.mooner.neonjs.runtime.Attr;
 import dev.mooner.neonjs.runtime.JSObject;
 import dev.mooner.neonjs.runtime.NotFound;
+import dev.mooner.neonjs.runtime.ProxyObject;
 import dev.mooner.neonjs.runtime.Realm;
 import dev.mooner.neonjs.runtime.Undefined;
 import io.github.kltyton.kltytonui.script.neon.NeonDocumentRuntime;
@@ -85,7 +88,16 @@ public final class NeonHostConverter implements ContextGate {
         if (owner == null || owner.bindings() == null) return raw;
         NeonValue cached = owner.bindings().cached(target);
         NeonValue wrapped = cached == null ? owner.bindings().wrap(target, engine.value(raw)) : cached;
-        return (JSObject) engine.raw(wrapped);
+        JSObject result = (JSObject) engine.raw(wrapped);
+        if (cached == null && raw instanceof HostObject && result instanceof ProxyObject proxy) {
+            // host.js exposes raw members as configurable enumerable properties.
+            // Enumeration needs their presence and flags, never their values.
+            proxy.setHostPropertyAttributesLookup(key -> owner.run(context -> {
+                int own = proxy.target.getOwnPropertyAttributes(key);
+                return own >= 0 ? own : raw.hasProperty(key) ? Attr.ALL : -1;
+            }));
+        }
+        return result;
     }
 
     @Override public ContextGate callbackGate() {

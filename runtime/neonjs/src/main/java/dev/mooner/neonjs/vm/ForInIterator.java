@@ -1,9 +1,9 @@
 package dev.mooner.neonjs.vm;
 
 import dev.mooner.neonjs.runtime.JSObject;
+import dev.mooner.neonjs.runtime.Attr;
 import dev.mooner.neonjs.runtime.JSSymbol;
 import dev.mooner.neonjs.runtime.PK;
-import dev.mooner.neonjs.runtime.PropertyDescriptor;
 import java.util.HashSet;
 import java.util.List;
 
@@ -31,10 +31,10 @@ public final class ForInIterator {
             while (index < currentKeys.size()) {
                 Object key = currentKeys.get(index++);
                 if (key instanceof JSSymbol || visited.contains(key)) continue;
-                PropertyDescriptor descriptor = current.getOwnProperty(key);
-                if (descriptor == null) continue;
+                int attributes = current.getOwnPropertyAttributes(key);
+                if (attributes < 0) continue;
                 visited.add(key);
-                if (descriptor.enumerable) return PK.toValue(key);
+                if ((attributes & Attr.ENUMERABLE) != 0) return PK.toValue(key);
             }
             object = current.getPrototypeOf();
             keys = null;

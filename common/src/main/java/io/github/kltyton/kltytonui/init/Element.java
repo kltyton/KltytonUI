@@ -181,6 +181,7 @@ public class Element extends Node {
     }
 
     protected final void invalidateStyleCaches() {
+        cascadedStyle = null;
         renderElement.computedStyle.clear();
         renderElement.transform.clear();
         clearPseudoElementCaches();
@@ -236,6 +237,8 @@ public class Element extends Node {
         node.forEachRoute(consumer);
     }
 
+    private Style cascadedStyle;
+    private Selector.Index matchedSelectorIndex;
     private Style inlineStyle;
     private Style inlineStyleSnapshot;
     private List<InlineStyleDeclaration.Entry> inlineDeclarations = new ArrayList<>();
@@ -382,10 +385,7 @@ public class Element extends Node {
 
         // Variable lookup may reach an ancestor before that ancestor is rendered.
         // Build its selector cache here so inheritance is independent of render order.
-        ensureCssCacheReady();
-        Style rawStyle = new Style();
-        rawStyle.mergeCascade(cssCache, getAttribute("style"));
-        return rawStyle.getCustomProperty(name);
+        return getCascadedStyle().getCustomProperty(name);
     }
 
     public String getCustomPropertyInherit(String name) {
@@ -433,7 +433,7 @@ public class Element extends Node {
         attributes.put(name, value);
         if (name.equals("style")) {
             // 保持 style 缓存与 attributes 同步，避免后续读取出现旧值。
-            updateInlineStyle();
+            updateInlineStyleAfterAttributeMutation();
         }
         if (name.equals("value")) {
             if (!valueDirty || this.value == null) {
@@ -477,7 +477,7 @@ public class Element extends Node {
         String oldId = "id".equals(name) ? id : null;
         attributes.remove(name);
         if (name.equals("style")) {
-            updateInlineStyle();
+            updateInlineStyleAfterAttributeMutation();
         }
         if (name.equals("value")) {
             if (!valueDirty) {
@@ -635,6 +635,7 @@ public class Element extends Node {
 
         cssCache = matched;
         cssCacheMatched = true;
+        matchedSelectorIndex = document == null ? null : document.getSelectorIndex();
         invalidateStyleCaches();
 
         Style currentStyle = getRawComputedStyle();
@@ -694,10 +695,10 @@ public class Element extends Node {
         if (cache != null) {
             computedStyle = cache;
         } else {
-            ensureCssCacheReady();
-            computedStyle = new Style();
-            computedStyle.applyUserAgentDefaults(this);
-            computedStyle.mergeCascade(cssCache, getAttribute("style"));
+            computedStyle = getCascadedStyle();
+            // Resolution mutates longhands. Only an unconsumed raw cascade can
+            // be reused; a later computed-style invalidation must resolve afresh.
+            cascadedStyle = null;
             // 先缓存当前构建中的 Style，避免 var() 解析阶段再次回到本元素时重复创建并递归进入。
             renderElement.computedStyle.set(computedStyle);
             computedStyle.resolveVarReferences(this);
@@ -709,17 +710,53 @@ public class Element extends Node {
         return computedStyle;
     }
 
+    private Style getCascadedStyle() {
+        ensureCssCacheReady();
+        Style cached = cascadedStyle;
+        if (cached != null) return cached;
+        Style style = new Style();
+        style.applyUserAgentDefaults(this);
+        style.mergeCascade(cssCache, getAttribute("style"));
+        cascadedStyle = style;
+        return style;
+    }
+
+    @HideFromScript
+    public boolean isOutOfFlowForTreeChange() {
+        String inline = InlineStyleDeclaration.parse(getAttribute("style")).get("position");
+        CSS.Declaration sheet = Selector.matchCSS(this).get("position");
+        String position = inline != null && (sheet == null || !sheet.important()
+                || "important".equals(InlineStyleDeclaration.priorityOf(inline)))
+                ? InlineStyleDeclaration.valueWithoutPriority(inline)
+                : sheet == null ? "" : sheet.value();
+        return "absolute".equals(position) || "fixed".equals(position);
+    }
+
     private void ensureCssCacheReady() {
         if (pseudoElement) {
             cssCache = Selector.matchPseudoElementCSS(pseudoElementHost, pseudoElementKind);
             return;
         }
-        if (document == null || cssCacheMatched) return;
+        if (document == null) return;
+        Selector.Index index = document.getSelectorIndex();
+        if (cssCacheMatched && matchedSelectorIndex == index) return;
         // 元素无 class/id/属性时亦应匹配：
         // 标签/后代选择器（如 p{}/richtext h1{} ）不依赖目标元素的 class/id。
         // Selector.matchCSS 通过 byTag 索引高效匹配，结果缓存于 cssCacheMatched。
         cssCache = Selector.matchCSS(this);
         cssCacheMatched = true;
+        matchedSelectorIndex = index;
+        cascadedStyle = null;
+    }
+
+    private void updateInlineStyleAfterAttributeMutation() {
+        // Synchronous geometry users may read immediately after a style attribute
+        // write. Observe the authored change here, never while initializing a CSSOM read.
+        Style previous = inlineStyleSnapshot;
+        boolean notify = inlineStyleInitialized && isConnected();
+        if (notify && previous == null) previous = inlineStyle().clone();
+        updateInlineStyle();
+        if (notify) RenderElement.observeStyle(this, previous, inlineStyle);
     }
 
     public void updateInlineStyle() {
@@ -736,16 +773,13 @@ public class Element extends Node {
             String attributeValue = rawAttributeValue == null ? "" : rawAttributeValue;
             inlineDeclarations = InlineStyleDeclaration.parseEntries(attributeValue);
             Style style = inlineStyle();
-            Style previousStyle = inlineStyleSnapshot;
-            if (inlineStyleInitialized && previousStyle == null) previousStyle = style.clone();
             style.resetInlineDeclaration();
             // CSSOM 视图取“最后一条声明”（如 el.style.color），按声明顺序覆盖、不按重要性折叠。
             for (InlineStyleDeclaration.Entry entry : inlineDeclarations) {
                 style.update(entry.property(), InlineStyleDeclaration.valueWithoutPriority(entry.value()));
             }
-            if (inlineStyleInitialized && isConnected()) {
-                RenderElement.observeStyle(this, previousStyle, style);
-            }
+            // Parsing the CSSOM declaration is read-only. Mutation entry points
+            // queue comparison of the previous and next computed styles.
             inlineStyleSnapshot = style.clone();
             inlineStyleAttributeSnapshot = rawAttributeValue;
             inlineStyleInitialized = true;
@@ -3206,6 +3240,7 @@ public class Element extends Node {
 
     public void invalidateSubtreeAfterAttach() {
         pendingPreviousStyle = null;
+        cssCacheMatched = false;
         invalidateStyleCaches();
         renderElement.route.clear();
         renderElement.transform.clear();

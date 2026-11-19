@@ -55,8 +55,8 @@ final class ObjectBuiltins {
                 if (source == Undefined.INSTANCE || source == dev.mooner.neonjs.runtime.Null.INSTANCE) continue;
                 JSObject from = Ops.toObject(source);
                 for (Object key : from.ownPropertyKeys()) {
-                    PropertyDescriptor descriptor = from.getOwnProperty(key);
-                    if (descriptor != null && descriptor.enumerable) {
+                    int attributes = from.getOwnPropertyAttributes(key);
+                    if (attributes >= 0 && (attributes & Attr.ENUMERABLE) != 0) {
                         to.setOrThrow(key, from.get(key, from));
                     }
                 }
@@ -237,8 +237,8 @@ final class ObjectBuiltins {
         });
         BuiltinsKt.method(proto, realm, "propertyIsEnumerable", 1, (function, thisValue, args, newTarget) -> {
             Object key = Ops.toPropertyKey(Values.arg(args, 0));
-            PropertyDescriptor descriptor = Ops.toObject(thisValue).getOwnProperty(key);
-            return descriptor != null && descriptor.enumerable;
+            int attributes = Ops.toObject(thisValue).getOwnPropertyAttributes(key);
+            return attributes >= 0 && (attributes & Attr.ENUMERABLE) != 0;
         });
         BuiltinsKt.method(proto, realm, "toLocaleString", 0, (function, thisValue, args, newTarget) ->
                 Ops.invoke(thisValue, "toString", Values.EMPTY_ARGS));
@@ -319,8 +319,8 @@ final class ObjectBuiltins {
         JSObject source = Ops.toObject(properties);
         ArrayList<PropertyEntry> descriptors = new ArrayList<>();
         for (Object key : source.ownPropertyKeys()) {
-            PropertyDescriptor property = source.getOwnProperty(key);
-            if (property != null && property.enumerable) {
+            int attributes = source.getOwnPropertyAttributes(key);
+            if (attributes >= 0 && (attributes & Attr.ENUMERABLE) != 0) {
                 descriptors.add(new PropertyEntry(key, Ops.toPropertyDescriptor(source.get(key, source))));
             }
         }
@@ -332,8 +332,8 @@ final class ObjectBuiltins {
         ArrayList<Object> out = new ArrayList<>();
         for (Object key : object.ownPropertyKeys()) {
             if (key instanceof JSSymbol) continue;
-            PropertyDescriptor descriptor = object.getOwnProperty(key);
-            if (descriptor == null || !descriptor.enumerable) continue;
+            int attributes = object.getOwnPropertyAttributes(key);
+            if (attributes < 0 || (attributes & Attr.ENUMERABLE) == 0) continue;
             if (kind == 0) out.add(PK.toValue(key));
             else if (kind == 1) out.add(object.get(key, object));
             else out.add(Builtins.arrayOf(realm, new ArrayList<>(

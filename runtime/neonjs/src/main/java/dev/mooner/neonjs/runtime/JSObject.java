@@ -95,6 +95,17 @@ public class JSObject {
         return ordinaryGetOwnProperty(key);
     }
 
+    /** Property flags without materializing values; exotic objects retain their descriptor operation. */
+    public int getOwnPropertyAttributes(Object key) {
+        if ((special & EXOTIC_OWN) != 0) {
+            PropertyDescriptor descriptor = getOwnProperty(key);
+            return descriptor == null ? -1 : descriptor.attrs();
+        }
+        PropertyMap map = props;
+        int entry = map == null ? -1 : map.find(key);
+        return entry < 0 ? -1 : map.flags[entry];
+    }
+
     public final PropertyDescriptor ordinaryGetOwnProperty(Object key) {
         PropertyMap map = props;
         if (map == null) return null;

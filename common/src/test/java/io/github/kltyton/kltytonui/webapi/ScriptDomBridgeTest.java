@@ -7,10 +7,51 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScriptDomBridgeTest {
+    @Test
+    void readingPendingInlineShorthandsDoesNotComputeStyles() {
+        Document document = TestDocumentFactory.createDocument();
+        Element element = document.createElement("div");
+        document.body.appendChild(element);
+        element.setInlineStyleProperty("margin", "2px 4px");
+        int dirtyCount = document.getDirtyElements().size();
+
+        assertEquals("4px", element.getInlineStylePropertyValue("margin-left"));
+        assertEquals("", element.getInlineStylePropertyValue("width"));
+        assertNull(element.getRenderer().computedStyle.get());
+        assertEquals(dirtyCount, document.getDirtyElements().size());
+
+        element.setInlineStyleProperty("--accent", "red");
+        element.setInlineStyleProperty("color", "var(--accent)");
+        assertEquals("red", element.getComputedStyle().color);
+        element.setInlineStyleProperty("--accent", "blue");
+        assertEquals("blue", element.getComputedStyle().color);
+    }
+
+    @Test
+    void rawCustomPropertyCascadeRetainsPriorityAndInvalidation() {
+        Document document = TestDocumentFactory.createDocument();
+        Element parent = document.createElement("div");
+        document.body.appendChild(parent);
+        parent.setAttribute("style", "--tone:red!important;--tone:green;--alias:var(--tone);");
+        assertEquals("red", parent.getRawCustomProperty("--tone"));
+        assertEquals("var(--tone)", parent.getRawCustomProperty("--alias"));
+        assertNull(parent.getRenderer().computedStyle.get());
+
+        Element child = document.createElement("div");
+        parent.appendChild(child);
+        child.setAttribute("style", "color:var(--alias);width:var(--missing,17px)");
+        assertEquals("red", child.getComputedStyle().color);
+        assertEquals("17px", child.getComputedStyle().width);
+        parent.setInlineStyleProperty("--tone", "blue", "important");
+        document.flushPendingStyleUpdates();
+        assertEquals("blue", child.getComputedStyle().color);
+    }
+
     @Test
     void directInlineStyleFieldWritesSynchronizeAttributeAndComputedStyle() {
         Document document = TestDocumentFactory.createDocument();

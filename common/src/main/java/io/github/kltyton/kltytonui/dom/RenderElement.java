@@ -189,6 +189,7 @@ public class RenderElement {
     public long explicitHeightMemoDep = Long.MIN_VALUE;
     private Rect committedRect = null;
     private boolean committedFixedPosition;
+    private boolean committedOutOfFlow;
     private Matrix4f committedWorldTransform = null;
     private long styleVersion = 1L;
     private long textVersion = 1L;
@@ -233,13 +234,19 @@ public class RenderElement {
 
     public void commitRect(Rect rect, long dependency) {
         committedRect = rect;
-        committedFixedPosition = "fixed".equals(element.getComputedStyle().position);
+        String position = element.getComputedStyle().position;
+        committedFixedPosition = "fixed".equals(position);
+        committedOutOfFlow = committedFixedPosition || "absolute".equals(position);
         committedRectDependency = dependency;
         committedRectScrollFreeDependency = rectDependencyExcludingScroll(element.document);
     }
 
     public boolean wasFixedAtLayoutCommit() {
         return committedFixedPosition;
+    }
+
+    public boolean wasOutOfFlowAtLayoutCommit() {
+        return committedOutOfFlow;
     }
 
     public void commitWorldTransform(Matrix4f worldTransform, long dependency) {
@@ -692,12 +699,13 @@ public class RenderElement {
         boolean flowLayoutChanged = check.test(LAYOUT_PROPS);
         boolean geometryChanged = check.test(OUT_OF_FLOW_GEOMETRY_PROPS);
         boolean outOfFlow = isOutOfFlowStyle(element, origin) && isOutOfFlowStyle(element, current);
-        boolean localGeometryChanged = geometryChanged && outOfFlow && !flowLayoutChanged;
+        boolean localGeometryChanged = outOfFlow
+                && (geometryChanged || flowLayoutChanged || paddingChanged || borderGeometryChanged);
         boolean layoutChanged = flowLayoutChanged || geometryChanged;
-        boolean localFlowChange = (paddingChanged || borderGeometryChanged || layoutChanged)
+        boolean localFlowChange = !outOfFlow && (paddingChanged || borderGeometryChanged || layoutChanged)
                 && preservesNormalFlowContribution(element, origin, current);
 
-        if ((paddingChanged || borderGeometryChanged) && !localFlowChange) {
+        if ((paddingChanged || borderGeometryChanged) && !localFlowChange && !outOfFlow) {
             element.forEachRoute(e -> e.getRenderer().size.clear());
             element.forEachRoute(e -> e.getRenderer().box.clear());
             if (element.parentElement != null) {
@@ -806,7 +814,6 @@ public class RenderElement {
 
     private static boolean preservesNormalFlowContribution(Element element, Style origin, Style current) {
         Element parent = element.parentElement;
-        Style parentStyle = parent == null ? null : parent.getComputedStyle();
         Rect previous = element.getRenderer().getCommittedRect();
         if (parent == null || previous == null || parent.getRenderer().getCommittedRect() == null
                 || parent.getRenderer().size.get() == null || parent.hasDirtyFlag(Drawer.RELAYOUT | Drawer.REORDER)
@@ -814,8 +821,8 @@ public class RenderElement {
                 || !"flex".equals(origin.display) || !"flex".equals(current.display)
                 || !origin.isBorderBox() || !current.isBorderBox()
                 || !Layout.isInFlow(origin) || !Layout.isInFlow(current)
-                || !"block".equals(parentStyle.display)
                 || origin.clipsOverflow() || current.clipsOverflow()) return false;
+        if (!"block".equals(parent.getComputedStyle().display)) return false;
         for (String property : LAYOUT_PROPS) {
             if (!"marginTop".equals(property) && !Objects.equals(origin.get(property), current.get(property))) return false;
         }

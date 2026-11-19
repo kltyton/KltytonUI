@@ -1,6 +1,5 @@
 package io.github.kltyton.kltytonui.style;
 
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 import io.github.kltyton.kltytonui.init.Element;
@@ -9,7 +8,7 @@ import io.github.kltyton.kltytonui.parser.CssString;
 
 /**
  * var() 引用解析。从 Style 拆出；Style.resolveVarReferences 保留为 public 委托。
- * 经 Style 的包内可见 STYLE_FIELDS 与公开 getCustomProperty() 读取字段与变量值，
+ * 经 Style 的字段访问器与公开 getCustomProperty() 读取字段与变量值，
  * 不持有状态。
  */
 public final class VarResolver {
@@ -30,28 +29,25 @@ public final class VarResolver {
      * @param context 当前元素，用于沿继承链查找自定义属性
      */
     public static void resolveReferences(Style style, Element context) {
-        for (Field field : Style.STYLE_FIELDS) {
-            try {
-                String value = (String) field.get(style);
-                if (value == null || !value.contains("var(")) continue;
-                String resolved = resolveVarInValue(style, value, context, 0);
-                // An unresolved text color is invalid at computed-value time and inherits.
-                if (field.getName().equals("color") && resolved.contains("var(")) resolved = "unset";
-                if (resolved.startsWith(ShorthandParser.PENDING_BACKGROUND)) {
-                    String background = resolved.substring(ShorthandParser.PENDING_BACKGROUND.length(), resolved.length() - 1);
-                    Style probe = new Style();
-                    ShorthandParser.applyBackground(probe, background.contains("var(") ? "" : background);
-                    resolved = (String) field.get(probe);
-                } else if (resolved.startsWith(ShorthandParser.PENDING_TRANSITION)) {
-                    String transition = resolved.substring(ShorthandParser.PENDING_TRANSITION.length(), resolved.length() - 1);
-                    Style probe = new Style();
-                    ShorthandParser.applyTransition(probe, transition.contains("var(") ? "initial" : transition);
-                    resolved = (String) field.get(probe);
-                }
-                if (!resolved.equals(value)) {
-                    field.set(style, resolved);
-                }
-            } catch (IllegalAccessException ignored) {
+        for (int field = 0; field < Style.STYLE_FIELDS.length; field++) {
+            String value = Style.readField(style, field);
+            if (value == null || !value.contains("var(")) continue;
+            String resolved = resolveVarInValue(style, value, context, 0);
+            // An unresolved text color is invalid at computed-value time and inherits.
+            if (Style.STYLE_FIELD_CSS_NAMES[field].equals("color") && resolved.contains("var(")) resolved = "unset";
+            if (resolved.startsWith(ShorthandParser.PENDING_BACKGROUND)) {
+                String background = resolved.substring(ShorthandParser.PENDING_BACKGROUND.length(), resolved.length() - 1);
+                Style probe = new Style();
+                ShorthandParser.applyBackground(probe, background.contains("var(") ? "" : background);
+                resolved = Style.readField(probe, field);
+            } else if (resolved.startsWith(ShorthandParser.PENDING_TRANSITION)) {
+                String transition = resolved.substring(ShorthandParser.PENDING_TRANSITION.length(), resolved.length() - 1);
+                Style probe = new Style();
+                ShorthandParser.applyTransition(probe, transition.contains("var(") ? "initial" : transition);
+                resolved = Style.readField(probe, field);
+            }
+            if (!resolved.equals(value)) {
+                Style.writeField(style, field, resolved);
             }
         }
         Map<String, CSS.Declaration> pending = style.pendingShorthands;

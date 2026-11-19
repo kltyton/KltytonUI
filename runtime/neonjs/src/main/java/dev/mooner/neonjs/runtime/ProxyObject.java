@@ -10,11 +10,14 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.ToIntFunction;
 
 /** Proxy exotic object (ECMA-262 10.5); derived from NeonJS and adapted to Java. */
 public final class ProxyObject extends JSObject {
     public JSObject target;
     public JSObject handler;
+    private JSObject attributesHandler;
+    private ToIntFunction<Object> attributesLookup;
 
     public ProxyObject(JSObject target, JSObject handler) {
         super(null);
@@ -43,6 +46,19 @@ public final class ProxyObject extends JSObject {
             throw JSException.typeError("Cannot perform operation on a revoked proxy");
         }
         return new Checked(Objects.requireNonNull(target), checkedHandler);
+    }
+
+    /** Installs a native host adapter's value-free descriptor flags. Guest proxies use their traps. */
+    public void setHostPropertyAttributesLookup(ToIntFunction<Object> lookup) {
+        attributesHandler = handler;
+        attributesLookup = Objects.requireNonNull(lookup);
+    }
+
+    @Override
+    public int getOwnPropertyAttributes(Object key) {
+        check();
+        return attributesLookup != null && handler == attributesHandler
+                ? attributesLookup.applyAsInt(key) : super.getOwnPropertyAttributes(key);
     }
 
     private static JSObject trap(JSObject handler, String name) {
@@ -354,8 +370,8 @@ public final class ProxyObject extends JSObject {
         List<Object> configurable = new ArrayList<>();
         List<Object> nonConfigurable = new ArrayList<>();
         for (Object key : targetKeys) {
-            PropertyDescriptor descriptor = target.getOwnProperty(key);
-            if (descriptor != null && !descriptor.configurable) nonConfigurable.add(key);
+            int attributes = target.getOwnPropertyAttributes(key);
+            if (attributes >= 0 && (attributes & Attr.CONFIGURABLE) == 0) nonConfigurable.add(key);
             else configurable.add(key);
         }
         if (extensible && nonConfigurable.isEmpty()) return keys;

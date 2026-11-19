@@ -242,7 +242,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     private transient Boolean clipsOverflowMemo;
     private transient Interaction.Visibility visibilityMemo;
 
-    private static final Map<String, Field> FIELD_CACHE = new HashMap<>();
+    private static final Map<String, Integer> FIELD_CACHE = new HashMap<>();
     private static final Map<String, String> STYLE_NAME = new HashMap<>();
     static final Field[] STYLE_FIELDS;
     static final String[] STYLE_FIELD_CSS_NAMES;
@@ -270,9 +270,9 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
                 String cssName = camelToKebab(fieldName); // 例如: "font-size"
 
                 // 将驼峰名 ("fontSize") 和 CSS名 ("font-size") 都指向同一个 Field 对象
-                FIELD_CACHE.put(fieldName, field);
+                FIELD_CACHE.put(fieldName, fields.size());
                 if (!fieldName.equals(cssName)) {
-                    FIELD_CACHE.put(cssName, field);
+                    FIELD_CACHE.put(cssName, fields.size());
                 }
                 fields.add(field);
                 cssNames.add(cssName);
@@ -450,13 +450,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         LinkedHashMap<String, String> changes = new LinkedHashMap<>();
         if (previous == null) return changes;
         for (int i = 0; i < STYLE_FIELDS.length; i++) {
-            try {
-                String current = (String) STYLE_FIELDS[i].get(this);
-                String old = (String) STYLE_FIELDS[i].get(previous);
-                if (!java.util.Objects.equals(current, old)) {
-                    changes.put(STYLE_FIELD_CSS_NAMES[i], current == null ? "" : current);
-                }
-            } catch (IllegalAccessException ignored) {
+            String current = readField(this, i);
+            String old = readField(previous, i);
+            if (!java.util.Objects.equals(current, old)) {
+                changes.put(STYLE_FIELD_CSS_NAMES[i], current == null ? "" : current);
             }
         }
         for (String name : previous.customProperties.keySet()) {
@@ -507,6 +504,10 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
             "margin-block-start", "margin-block-end", "border-inline-start", "border-inline-end",
             "border-inline-width"
     );
+
+    private static final Set<String> GRID_STYLE_PROPERTIES = Set.of(
+            "grid", "gridTemplate", "gridRow", "gridColumn", "gridArea",
+            "placeItems", "placeSelf", "placeContent");
 
     private void applyStylesheet(Map<String, CSS.Declaration> stylesheet, boolean important) {
         if (stylesheet == null) return;
@@ -578,8 +579,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
             ShorthandParser.applyMask(this, value);
             return;
         }
-        if (Set.of("grid", "gridTemplate", "gridRow", "gridColumn", "gridArea",
-                "placeItems", "placeSelf", "placeContent").contains(styleName)) {
+        if (GRID_STYLE_PROPERTIES.contains(styleName)) {
             ShorthandParser.applyGrid(this, cssName, value);
             return;
         }
@@ -661,7 +661,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         if ("visibility".equals(styleName)) {
             value = Interaction.normalizeVisibility(value);
         }
-        Field field = FIELD_CACHE.get(styleName);
+        Integer field = FIELD_CACHE.get(styleName);
         if (field == null) {
             if (UNSUPPORTED_PROPERTIES.add(styleName)) {
                 KltytonUI.LOGGER.warn(
@@ -672,11 +672,7 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
             }
             return;
         }
-        try {
-            field.set(this, value);
-        } catch (IllegalAccessException exception) {
-            KltytonUI.LOGGER.error("[KUI CSS] failed to apply property={} value={}", name, value, exception);
-        }
+        writeField(this, field, value);
     }
 
     public void applyUserAgentDefaults(Element element) {
@@ -733,24 +729,17 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
     }
 
     public String getFieldValue(String styleName) {
-        Field field = FIELD_CACHE.get(styleName);
+        Integer field = FIELD_CACHE.get(styleName);
         if (field == null) return "unset";
-        try {
-            Object value = field.get(this);
-            return value == null ? "unset" : value.toString();
-        } catch (IllegalAccessException ignored) {
-            return "unset";
-        }
+        String value = readField(this, field);
+        return value == null ? "unset" : value;
     }
 
     public void setFieldValue(String styleName, String value) {
-        Field field = FIELD_CACHE.get(styleName);
+        Integer field = FIELD_CACHE.get(styleName);
         if (field == null) return;
         resetMetrics();
-        try {
-            field.set(this, value);
-        } catch (IllegalAccessException ignored) {
-        }
+        writeField(this, field, value);
     }
 
 
@@ -761,13 +750,9 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
         }
         if ("-webkit-appearance".equalsIgnoreCase(name)) name = "appearance";
         String styleName = transformStyleName(name);
-        Field field = FIELD_CACHE.get(styleName);
+        Integer field = FIELD_CACHE.get(styleName);
         if (field == null) return null;
-        try {
-            return (String) field.get(this);
-        } catch (IllegalAccessException ignored) {
-        }
-        return null;
+        return readField(this, field);
     }
 
     public String getCustomProperty(String name) {

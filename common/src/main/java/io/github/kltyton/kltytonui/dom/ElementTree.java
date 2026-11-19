@@ -347,7 +347,7 @@ public final class ElementTree {
         if (oldParent != null) {
             int textSourceBefore = renderTextSourceMode(oldParent);
             boolean neutralNode = isGeometryNeutralNode(node, oldParent)
-                    && (!(node instanceof Element element) || element.getRenderer().wasFixedAtLayoutCommit());
+                    && (!(node instanceof Element element) || element.getRenderer().wasOutOfFlowAtLayoutCommit());
             int index = oldParent.childNodes.indexOf(node);
             Node previousSibling = index > 0 ? oldParent.childNodes.get(index - 1) : null;
             Node nextSibling = index >= 0 && index + 1 < oldParent.childNodes.size() ? oldParent.childNodes.get(index + 1) : null;
@@ -401,12 +401,9 @@ public final class ElementTree {
     private boolean isGeometryNeutralNode(Node node, Node parent) {
         if (node instanceof CommentNode) return true;
         if (node instanceof TextNode text) return text.getTextContent().isEmpty();
-        if (!(node instanceof Element element) || parent != owner.body) return false;
-        // Teleported fixed roots do not change BODY's flow allocation. Match in
-        // the current tree because moving a node can change its positioning rule.
-        Style matched = new Style();
-        matched.mergeCascade(Selector.matchCSS(element), element.getAttribute("style"));
-        return "fixed".equals(matched.position);
+        if (!(node instanceof Element element)) return false;
+        // Resolve in the current tree: reparenting can change positioning rules.
+        return element.isOutOfFlowForTreeChange();
     }
 
     private static int renderTextSourceMode(Node node) {
@@ -427,7 +424,7 @@ public final class ElementTree {
             if (selectors.childListCanAffectStyles(parent)) {
                 owner.requestStyleRecalc(selectors.hasRelationalSelectors() ? owner.documentElement : parent);
             }
-            owner.markDirty(parent, Drawer.REORDER | Drawer.REPAINT | Drawer.HITTEST);
+            owner.markDirty(parent, Drawer.REORDER | Drawer.REPAINT | Drawer.HITTEST | Drawer.COMMIT_LAYOUT);
         } else {
             owner.markDirty(parent, Drawer.REPAINT);
         }
@@ -441,6 +438,8 @@ public final class ElementTree {
             renderer.size.clear();
             renderer.box.clear();
             renderer.position.clear();
+            Style style = renderer.computedStyle.get();
+            if (style != null && ("absolute".equals(style.position) || "fixed".equals(style.position))) break;
             current = current.parentElement;
         }
     }

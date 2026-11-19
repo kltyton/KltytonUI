@@ -283,6 +283,11 @@ public final class LayoutCommit {
         try {
             for (Element root : roots) {
                 if (root == null || root.document != document) continue;
+                // A removed out-of-flow child changes scroll overflow without
+                // changing any surviving rect or normal-flow allocation.
+                for (Element ancestor : root.getRouteArray()) {
+                    if (ancestor.mayRenderScrollbar()) scrollports.add(ancestor);
+                }
                 boolean covered = false;
                 Element[] route = root.getRouteArray();
                 for (int index = 1; index < route.length; index++) {
