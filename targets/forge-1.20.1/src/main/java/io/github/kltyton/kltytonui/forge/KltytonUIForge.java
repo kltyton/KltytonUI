@@ -26,6 +26,10 @@ import net.minecraftforge.fml.loading.FMLEnvironment;
 @Mod(KltytonUI.MODID)
 public class KltytonUIForge {
     public KltytonUIForge() {
+        var modContainer = ModLoadingContext.get().getActiveContainer();
+        String version = modContainer.getModInfo().getVersion().toString();
+        modContainer.registerDisplayTest(version,
+                (remoteVersion, fromServer) -> version.equals(remoteVersion) || (fromServer && remoteVersion == null));
         KuiLogging.installFileAppender();
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         KuiServicesBootstrap.init();

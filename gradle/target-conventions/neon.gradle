@@ -13,7 +13,7 @@ def fabricTarget = plugins.hasPlugin('fabric-loom') || plugins.hasPlugin('net.fa
 def embeddedConfiguration = fabricTarget ? 'include' : 'jarJar'
 
 [
-        [coordinate: neonRuntime, version: '0.1.4', range: '[0.1.4,0.1.5)']
+        [coordinate: neonRuntime, version: '0.1.4', range: '[0.1.4,)']
 ].each { item ->
     def dependency = versionedDependency(item.coordinate, item.range, item.version)
     dependencies.add('implementation', dependency)
