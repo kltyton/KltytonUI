@@ -1,5 +1,6 @@
 package io.github.kltyton.kltytonui.behavior;
 
+import io.github.kltyton.kltytonui.element.Svg;
 import io.github.kltyton.kltytonui.style.Animation;
 import io.github.kltyton.kltytonui.layout.Layout;
 import io.github.kltyton.kltytonui.style.Transition;
@@ -220,6 +221,7 @@ public final class MotionTrack {
     }
 
     private boolean invalidateMotionCaches(Element element, Style base, Style animated) {
+        Svg.invalidatePaintIfChanged(element, base, animated);
         RenderElement renderer = element.getRenderer();
         boolean requiresGeometryCommit = false;
 

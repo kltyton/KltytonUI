@@ -1,5 +1,6 @@
 package io.github.kltyton.kltytonui.dom;
 
+import io.github.kltyton.kltytonui.element.Svg;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Position;
 import io.github.kltyton.kltytonui.layout.Size;
@@ -595,6 +596,7 @@ public class RenderElement {
         };
 
         RenderElement renderer = element.getRenderer();
+        Svg.invalidatePaintIfChanged(element, origin, current);
 
         for (String prop : STRUCTURAL_PROPS) {
             String oVal = origin.get(prop);

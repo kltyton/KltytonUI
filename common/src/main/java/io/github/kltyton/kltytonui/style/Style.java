@@ -30,7 +30,9 @@ public class Style extends AbstractMap<String, String> implements Cloneable {
             "color", "selection-color", "font-size", "font-family", "font-weight", "font-style",
             "line-height", "direction", "letter-spacing", "text-align", "text-indent", "text-transform",
             "white-space", "word-break", "overflow-wrap", "cursor", "visibility", "accent-color", "text-stroke", "text-shadow",
-            "dynamic-range-limit", "image-rendering", "shape-rendering"
+            "dynamic-range-limit", "image-rendering", "shape-rendering",
+            "fill", "fill-opacity", "fill-rule", "stroke", "stroke-opacity", "stroke-width",
+            "stroke-linecap", "stroke-linejoin"
     );
 
     public String width = "unset";

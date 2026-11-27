@@ -3,6 +3,7 @@ package io.github.kltyton.kltytonui.init;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.kltyton.kltytonui.element.ContentEditable;
 import io.github.kltyton.kltytonui.element.RichText;
+import io.github.kltyton.kltytonui.element.Svg;
 import io.github.kltyton.kltytonui.layout.Box;
 import io.github.kltyton.kltytonui.layout.Flex;
 import io.github.kltyton.kltytonui.layout.Layout;
@@ -467,6 +468,7 @@ public class Element extends Node {
         }
         if (document != null && name != null && !Objects.equals(oldValue, value)) {
             invalidateTableSpan(name);
+            Svg.presentationAttributeChanged(this, name);
             document.queueMutation(Document.MutationRecord.attributes(this, name, oldValue));
         }
     }
@@ -507,6 +509,7 @@ public class Element extends Node {
         }
         if (document != null && name != null && oldValue != null) {
             invalidateTableSpan(name);
+            Svg.presentationAttributeChanged(this, name);
             document.queueMutation(Document.MutationRecord.attributes(this, name, oldValue));
         }
     }
@@ -665,6 +668,7 @@ public class Element extends Node {
         renderElement.computedStyle.clear();
         StyleFrameCache.invalidate(this);
         Style current = getRawComputedStyle();
+        if (previous != null) Svg.invalidatePaintIfChanged(this, previous, current);
         if (previous != null && !Objects.equals(previous.color, current.color)) {
             renderElement.background.clear();
             renderElement.maskLayers.clear();
@@ -716,6 +720,7 @@ public class Element extends Node {
         if (cached != null) return cached;
         Style style = new Style();
         style.applyUserAgentDefaults(this);
+        Svg.applyPresentationAttributes(this, style);
         style.mergeCascade(cssCache, getAttribute("style"));
         cascadedStyle = style;
         return style;
